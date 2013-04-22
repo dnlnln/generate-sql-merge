@@ -611,7 +611,7 @@ END
 ELSE
 BEGIN
 	--output the statement as xml (to overcome SSMS 4000/8000 char limitation)
-	SELECT s as [output] FROM (SELECT @output)d(s) FOR XML PATH('');
+	SELECT [processing-instruction(x)]=@output FOR XML PATH(''),TYPE;
 	PRINT 'MERGE statement has been wrapped in an XML fragment and output successfully.'
 	PRINT 'Ensure you have Results to Grid enabled and then click the hyperlink to copy the statement within the fragment.'
 	PRINT ''
