@@ -67,3 +67,37 @@ To generate a MERGE statement containing all data within the Person.AddressType 
 ```
 EXEC AdventureWorks.dbo.sp_generate_merge @schema = 'Person', @table_name ='AddressType', @cols_to_exclude = '''ModifiedDate'',''rowguid'''
 ```
+
+###Output
+
+```
+SET NOCOUNT ON
+GO 
+SET IDENTITY_INSERT [Person].[AddressType] ON
+GO
+MERGE INTO [Person].[AddressType] AS Target
+USING (VALUES
+  (1,'Billing')
+ ,(2,'Home')
+ ,(3,'Main Office')
+ ,(4,'Primary')
+ ,(5,'Shipping')
+ ,(6,'Contact')
+) AS Source ([AddressTypeID],[Name])
+ON (Target.[AddressTypeID] = Source.[AddressTypeID])
+WHEN MATCHED AND (
+    NULLIF(Source.[Name], Target.[Name]) IS NOT NULL OR NULLIF(Target.[Name], Source.[Name]) IS NOT NULL) THEN
+ UPDATE SET
+ [Name] = Source.[Name]
+WHEN NOT MATCHED BY TARGET THEN
+ INSERT([AddressTypeID],[Name])
+ VALUES(Source.[AddressTypeID],Source.[Name])
+WHEN NOT MATCHED BY SOURCE THEN 
+ DELETE;
+
+SET IDENTITY_INSERT [Person].[AddressType] OFF
+GO
+SET NOCOUNT OFF
+GO
+```
+
