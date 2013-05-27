@@ -543,7 +543,10 @@ DECLARE @tab TABLE (val NVARCHAR(max));
 INSERT INTO @tab
 EXEC (@Actual_Values)
 
-SET @output += CAST((SELECT @b + val FROM @tab FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
+IF (SELECT COUNT(*) FROM @tab) <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
+BEGIN
+ SET @output += CAST((SELECT @b + val FROM @tab FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
+END
 
 --Output the columns to correspond with each of the values above--------------------
 SET @output += @b + ') AS Source (' + @Column_List + ')'
