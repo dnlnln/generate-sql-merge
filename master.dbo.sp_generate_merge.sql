@@ -394,7 +394,7 @@ WHILE @Column_ID IS NOT NULL
  )
  BEGIN
  SET @Column_List_For_Update = @Column_List_For_Update + @Column_Name + ' = Source.' + @Column_Name + ', 
-' 
+  ' 
  SET @Column_List_For_Check = @Column_List_For_Check +
  CASE @Data_Type 
  WHEN 'text' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST(Source.' + @Column_Name + ' AS VARCHAR(MAX)), CAST(Target.' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST(Target.' + @Column_Name + ' AS VARCHAR(MAX)), CAST(Source.' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR '
@@ -551,7 +551,7 @@ IF LEN(@Column_List_For_Update) <> 0
 BEGIN
  SET @output += @b + 'WHEN MATCHED ' + CASE WHEN @update_only_if_changed = 1 THEN 'AND (' + @Column_List_For_Check + ') ' ELSE '' END + 'THEN'
  SET @output += @b + ' UPDATE SET'
- SET @output += @b + @Column_List_For_Update
+ SET @output += @b + LTRIM(@Column_List_For_Update)
 END
 
 
