@@ -474,7 +474,7 @@ SET @Actual_Values =
  COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK)')
 
  DECLARE @output VARCHAR(MAX) = ''
- DECLARE @b CHAR(1) = CHAR(13)
+ DECLARE @b CHAR(2) = CHAR(13) + CHAR(10)
 
 --Determining whether to ouput any debug information
 IF @debug_mode =1
