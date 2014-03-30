@@ -34,7 +34,8 @@ CREATE PROC sp_generate_merge
  @include_use_db bit = 1, -- When 1, includes a USE [DatabaseName] statement at the beginning of the generated batch
  @results_to_text bit = 0, -- When 1, outputs results to grid/messages window. When 0, outputs MERGE statement in an XML fragment.
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
- @nologo bit = 0 -- When 1, the "About" comment is suppressed from output
+ @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
+ @inlude_column_list_comment bit = 1 --Includes a comment with a list of columns in the MERGE statement.
 )
 AS
 BEGIN
@@ -536,6 +537,11 @@ IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT 
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
 SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS Target'
 SET @output += @b + 'USING (VALUES'
+
+IF @inlude_column_list_comment = 1
+BEGIN
+SET @output += @b + '--' + @Column_List
+END
 
 
 --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
