@@ -582,9 +582,7 @@ SET @output += @b
 --When NOT matched by source, DELETE the row
 SET @output +=      'WHEN NOT MATCHED BY SOURCE THEN '
 SET @output += @b + ' DELETE;'
-SET @output += @b
-SET @output += @b + 'GO'
-SET @output += @b
+SET @output += @b +@b
 
 --Display the number of affected rows to the user, or report if an error occurred---
 IF @include_rowsaffected = 1
@@ -628,7 +626,6 @@ BEGIN
  SET @output += @b
 END
 
-SET @output += @b + @b
 
 IF @results_to_text = 1
 BEGIN
