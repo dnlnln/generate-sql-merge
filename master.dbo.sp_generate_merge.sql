@@ -471,7 +471,7 @@ SET @Actual_Values =
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
  '''' + 
  ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + @PK_column_list + ') = 1 THEN '' '' ELSE '','' END + ''(''+ ' + @Actual_Values + '+'')''' + ' ' + 
- COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ORDER BY ' + @PK_column_list)
+ COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK)') + ' ORDER BY ' + @PK_column_list
 
  DECLARE @output VARCHAR(MAX) = ''
  DECLARE @b CHAR(2) = CHAR(13) + CHAR(10)
@@ -546,13 +546,13 @@ END
 
 
 --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
-DECLARE @tab TABLE (val NVARCHAR(max));
+DECLARE @tab TABLE (id BIGINT IDENTITY, val NVARCHAR(max));
 INSERT INTO @tab
 EXEC (@Actual_Values)
 
 IF (SELECT COUNT(*) FROM @tab) <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
 BEGIN
- SET @output += CAST((SELECT val + @b FROM @tab FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
+ SET @output += CAST((SELECT val + @b FROM @tab ORDER BY id FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
 END
 
 --Output the columns to correspond with each of the values above--------------------
