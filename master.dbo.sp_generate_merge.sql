@@ -35,7 +35,8 @@ CREATE PROCEDURE dbo.sp_generate_merge
  @results_to_text bit = 0, -- When 1, outputs results to grid/messages window. When 0, outputs MERGE statement in an XML fragment.
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
- @inlude_column_list_comment bit = 1 --Includes a comment with a list of columns in the MERGE statement.
+ @inlude_column_list_comment bit = 1, --Includes a comment with a list of columns in the MERGE statement.
+ @case_sensitive bit = 1 --Use SQL_Latin1_General_CP1_CS_AS collation to allow changes in case to cause an update.
 )
 AS
 BEGIN
@@ -244,7 +245,8 @@ DECLARE @Column_ID int,
  @Actual_Values nvarchar(max), --This is the string that will be finally executed to generate a MERGE statement
  @IDN varchar(128), --Will contain the IDENTITY column's name in the table
  @Target_Table_For_Output varchar(776),
- @Source_Table_Qualified varchar(776)
+ @Source_Table_Qualified varchar(776),
+ @collate varchar(50) --
  
  
 
@@ -257,6 +259,12 @@ SET @Column_List = ''
 SET @Column_List_For_Update = ''
 SET @Column_List_For_Check = ''
 SET @Actual_Values = ''
+SET @collate = ''
+
+IF @case_sensitive = 1
+BEGIN
+SET @collate = ' COLLATE SQL_Latin1_General_CP1_CS_AS'
+END
 
 --Variable Defaults
 IF @schema IS NULL
@@ -399,9 +407,10 @@ WHILE @Column_ID IS NOT NULL
  SET @Column_List_For_Update = @Column_List_For_Update + @Column_Name + ' = Source.' + @Column_Name + ', 
   ' 
  SET @Column_List_For_Check = @Column_List_For_Check +
- CASE @Data_Type 
- WHEN 'text' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST(Source.' + @Column_Name + ' AS VARCHAR(MAX)), CAST(Target.' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST(Target.' + @Column_Name + ' AS VARCHAR(MAX)), CAST(Source.' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR '
- WHEN 'ntext' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST(Source.' + @Column_Name + ' AS NVARCHAR(MAX)), CAST(Target.' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST(Target.' + @Column_Name + ' AS NVARCHAR(MAX)), CAST(Source.' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
+ CASE  
+ WHEN @Data_Type = 'text' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST(Source.' + @Column_Name + ' AS VARCHAR(MAX))' + @collate + ', CAST(Target.' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST(Target.' + @Column_Name + ' AS VARCHAR(MAX)), CAST(Source.' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR '
+ WHEN @Data_Type = 'ntext' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST(Source.' + @Column_Name + ' AS NVARCHAR(MAX))' + @collate + ', CAST(Target.' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST(Target.' + @Column_Name + ' AS NVARCHAR(MAX)), CAST(Source.' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
+ WHEN @Data_Type IN ('varchar','nvarchar','char','nchar') THEN CHAR(10) + CHAR(9) + 'NULLIF(Source.' + @Column_Name + @collate + ', Target.' + @Column_Name + ') IS NOT NULL OR NULLIF(Target.' + @Column_Name + ', Source.' + @Column_Name + ') IS NOT NULL OR '
  ELSE CHAR(10) + CHAR(9) + 'NULLIF(Source.' + @Column_Name + ', Target.' + @Column_Name + ') IS NOT NULL OR NULLIF(Target.' + @Column_Name + ', Source.' + @Column_Name + ') IS NOT NULL OR '
  END 
  END
