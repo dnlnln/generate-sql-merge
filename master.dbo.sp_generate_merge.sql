@@ -15,7 +15,7 @@ GO
 
 --Turn system object marking on
 
-CREATE PROC sp_generate_merge
+CREATE PROCEDURE dbo.sp_generate_merge
 (
  @table_name varchar(776), -- The table/view for which the MERGE statement will be generated using the existing data
  @target_table varchar(776) = NULL, -- Use this parameter to specify a different table name into which the data will be inserted/updated/deleted
@@ -34,7 +34,10 @@ CREATE PROC sp_generate_merge
  @include_use_db bit = 1, -- When 1, includes a USE [DatabaseName] statement at the beginning of the generated batch
  @results_to_text bit = 0, -- When 1, outputs results to grid/messages window. When 0, outputs MERGE statement in an XML fragment.
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
- @nologo bit = 0 -- When 1, the "About" comment is suppressed from output
+ @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
+ @inlude_column_list_comment bit = 1, --Includes a comment with a list of columns in the MERGE statement.
+ @case_sensitive bit = 1, --Use SQL_Latin1_General_CP1_CS_AS collation to allow changes in case to cause an update.
+ @batch_separator VARCHAR(50) = 'GO' -- Batch separator to use
 )
 AS
 BEGIN
@@ -243,7 +246,8 @@ DECLARE @Column_ID int,
  @Actual_Values nvarchar(max), --This is the string that will be finally executed to generate a MERGE statement
  @IDN varchar(128), --Will contain the IDENTITY column's name in the table
  @Target_Table_For_Output varchar(776),
- @Source_Table_Qualified varchar(776)
+ @Source_Table_Qualified varchar(776),
+ @collate varchar(50) --
  
  
 
@@ -256,6 +260,12 @@ SET @Column_List = ''
 SET @Column_List_For_Update = ''
 SET @Column_List_For_Check = ''
 SET @Actual_Values = ''
+SET @collate = ''
+
+IF @case_sensitive = 1
+BEGIN
+SET @collate = ' COLLATE SQL_Latin1_General_CP1_CS_AS'
+END
 
 --Variable Defaults
 IF @schema IS NULL
@@ -398,9 +408,10 @@ WHILE @Column_ID IS NOT NULL
  SET @Column_List_For_Update = @Column_List_For_Update + @Column_Name + ' = Source.' + @Column_Name + ', 
   ' 
  SET @Column_List_For_Check = @Column_List_For_Check +
- CASE @Data_Type 
- WHEN 'text' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST(Source.' + @Column_Name + ' AS VARCHAR(MAX)), CAST(Target.' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST(Target.' + @Column_Name + ' AS VARCHAR(MAX)), CAST(Source.' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR '
- WHEN 'ntext' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST(Source.' + @Column_Name + ' AS NVARCHAR(MAX)), CAST(Target.' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST(Target.' + @Column_Name + ' AS NVARCHAR(MAX)), CAST(Source.' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
+ CASE  
+ WHEN @Data_Type = 'text' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST(Source.' + @Column_Name + ' AS VARCHAR(MAX)), CAST(Target.' + @Column_Name + ' AS VARCHAR(MAX))' + @collate + ') IS NOT NULL OR NULLIF(CAST(Target.' + @Column_Name + ' AS VARCHAR(MAX)), CAST(Source.' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR '
+ WHEN @Data_Type = 'ntext' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST(Source.' + @Column_Name + ' AS NVARCHAR(MAX)), CAST(Target.' + @Column_Name + ' AS NVARCHAR(MAX))' + @collate + ') IS NOT NULL OR NULLIF(CAST(Target.' + @Column_Name + ' AS NVARCHAR(MAX)), CAST(Source.' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
+ WHEN @Data_Type IN ('varchar','nvarchar','char','nchar') THEN CHAR(10) + CHAR(9) + 'NULLIF(Source.' + @Column_Name + ', Target.' + @Column_Name + @collate + ') IS NOT NULL OR NULLIF(Target.' + @Column_Name + ', Source.' + @Column_Name + ') IS NOT NULL OR '
  ELSE CHAR(10) + CHAR(9) + 'NULLIF(Source.' + @Column_Name + ', Target.' + @Column_Name + ') IS NOT NULL OR NULLIF(Target.' + @Column_Name + ', Source.' + @Column_Name + ') IS NOT NULL OR '
  END 
  END
@@ -470,15 +481,15 @@ SET @Actual_Values =
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
  '''' + 
  ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + @PK_column_list + ') = 1 THEN '' '' ELSE '','' END + ''(''+ ' + @Actual_Values + '+'')''' + ' ' + 
- COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK)')
+ COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK)') + ' ORDER BY ' + @PK_column_list
 
  DECLARE @output VARCHAR(MAX) = ''
- DECLARE @b CHAR(1) = CHAR(13)
+ DECLARE @b CHAR(2) = CHAR(13) + CHAR(10)
 
 --Determining whether to ouput any debug information
 IF @debug_mode =1
  BEGIN
- SET @output += @b + '/*****START OF DEBUG INFORMATION*****'
+ SET @output +=      '/*****START OF DEBUG INFORMATION*****'
  SET @output += @b + ''
  SET @output += @b + 'The primary key column list:'
  SET @output += @b + @PK_column_list
@@ -493,36 +504,34 @@ IF @debug_mode =1
  SET @output += @b + @Actual_Values
  SET @output += @b + ''
  SET @output += @b + '*****END OF DEBUG INFORMATION*****/'
- SET @output += @b + ''
+ SET @output += @b + @b
  END
  
 IF (@include_use_db = 1)
 BEGIN
-	DECLARE @db varchar(120);
-	SET @db = 'USE ' + DB_NAME();
-	SET @output += @b + @db;
-	SET @output += @b + 'GO';
-	SET @output += @b + '';
+	SET @output +=      'USE ' + DB_NAME()
+	SET @output += @b + @batch_separator
+	SET @output += @b + @b
 END
 
 IF (@nologo = 0)
 BEGIN
- SET @output += @b + '--MERGE generated by ''sp_generate_merge'' stored procedure, Version 0.93'
+ SET @output +=      '--MERGE generated by ''sp_generate_merge'' stored procedure, Version 0.93'
  SET @output += @b + '--Originally by Vyas (http://vyaskn.tripod.com): sp_generate_inserts (build 22)'
  SET @output += @b + '--Adapted for SQL Server 2008/2012 by Daniel Nolan (http://danere.com)'
- SET @output += @b + ''
+ SET @output += @b + @b
 END
 
 IF (@include_rowsaffected = 1) -- If the caller has elected not to include the "rows affected" section, let MERGE output the row count as it is executed.
- SET @output += @b + 'SET NOCOUNT ON'
- SET @output += @b + ''
+ SET @output +=      'SET NOCOUNT ON'
+ SET @output += @b + @b
 
 
 --Determining whether to print IDENTITY_INSERT or not
 IF (LEN(@IDN) <> 0)
  BEGIN
- SET @output += @b + 'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' ON'
- SET @output += @b + ''
+ SET @output +=      'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' ON'
+ SET @output += @b + @b
  END
 
 
@@ -530,57 +539,65 @@ IF (LEN(@IDN) <> 0)
 IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT NULL)
  BEGIN
  SET @output += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' NOCHECK CONSTRAINT ALL' --Code to disable constraints temporarily
+ SET @output += @b
  END
 
 
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
-SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS Target'
+SET @output +=      'MERGE INTO ' + @Target_Table_For_Output + ' AS Target'
 SET @output += @b + 'USING (VALUES'
+SET @output += @b
+
+IF @inlude_column_list_comment = 1
+BEGIN
+SET @output +=      '--' + @Column_List
+SET @output += @b
+END
 
 
 --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
-DECLARE @tab TABLE (val NVARCHAR(max));
+DECLARE @tab TABLE (id BIGINT IDENTITY, val NVARCHAR(max));
 INSERT INTO @tab
 EXEC (@Actual_Values)
 
 IF (SELECT COUNT(*) FROM @tab) <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
 BEGIN
- SET @output += CAST((SELECT @b + val FROM @tab FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
+ SET @output += CAST((SELECT val + @b FROM @tab ORDER BY id FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
 END
 
 --Output the columns to correspond with each of the values above--------------------
-SET @output += @b + ') AS Source (' + @Column_List + ')'
-
+SET @output += ') AS Source (' + @Column_List + ')'
+SET @output += @b
 
 --Output the join columns ----------------------------------------------------------
-SET @output += @b + 'ON (' + @PK_column_joins + ')'
-
+SET @output += 'ON (' + @PK_column_joins + ')'
+SET @output += @b
 
 --When matched, perform an UPDATE on any metadata columns only (ie. not on PK)------
 IF LEN(@Column_List_For_Update) <> 0
 BEGIN
- SET @output += @b + 'WHEN MATCHED ' + CASE WHEN @update_only_if_changed = 1 THEN 'AND (' + @Column_List_For_Check + ') ' ELSE '' END + 'THEN'
+ SET @output +=      'WHEN MATCHED ' + CASE WHEN @update_only_if_changed = 1 THEN 'AND (' + @Column_List_For_Check + ') ' ELSE '' END + 'THEN'
  SET @output += @b + ' UPDATE SET'
  SET @output += @b + '  ' + LTRIM(@Column_List_For_Update)
+ SET @output += @b
 END
 
 
 --When NOT matched by target, perform an INSERT------------------------------------
-SET @output += @b + 'WHEN NOT MATCHED BY TARGET THEN';
+SET @output +=      'WHEN NOT MATCHED BY TARGET THEN';
 SET @output += @b + ' INSERT(' + @Column_List + ')'
 SET @output += @b + ' VALUES(' + REPLACE(@Column_List, '[', 'Source.[') + ')'
-
+SET @output += @b
 
 --When NOT matched by source, DELETE the row
-SET @output += @b + 'WHEN NOT MATCHED BY SOURCE THEN '
+SET @output +=      'WHEN NOT MATCHED BY SOURCE THEN '
 SET @output += @b + ' DELETE;'
-SET @output += @b + ''
-SET @output += @b + 'GO'
+SET @output += @b +@b
 
 --Display the number of affected rows to the user, or report if an error occurred---
 IF @include_rowsaffected = 1
 BEGIN
- SET @output += @b + 'DECLARE @mergeError int'
+ SET @output +=      'DECLARE @mergeError int'
  SET @output += @b + ' , @mergeCount int'
  SET @output += @b + 'SELECT @mergeError = @@ERROR, @mergeCount = @@ROWCOUNT'
  SET @output += @b + 'IF @mergeError != 0'
@@ -591,33 +608,34 @@ BEGIN
  SET @output += @b + ' BEGIN'
  SET @output += @b + ' PRINT ''' + @Target_Table_For_Output + ' rows affected by MERGE: '' + CAST(@mergeCount AS VARCHAR(100));';
  SET @output += @b + ' END'
- SET @output += @b + 'GO'
- SET @output += @b + ''
+ SET @output += @b + @batch_separator
+ SET @output += @b + @b
 END
 
 --Re-enable the previously disabled constraints-------------------------------------
 IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT NULL)
  BEGIN
- SET @output += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' CHECK CONSTRAINT ALL' --Code to enable the previously disabled constraints
- SET @output += @b + 'GO'
+ SET @output +=      'ALTER TABLE ' + @Target_Table_For_Output + ' CHECK CONSTRAINT ALL' --Code to enable the previously disabled constraints
+ SET @output += @b + @batch_separator
+ SET @output += @b
  END
 
 
 --Switch-off identity inserting------------------------------------------------------
 IF (LEN(@IDN) <> 0)
  BEGIN
- SET @output += @b + 'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' OFF'
- SET @output += @b + 'GO'
+ SET @output +=      'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' OFF'
+ SET @output += @b + @batch_separator
+ SET @output += @b
  END
 
 IF (@include_rowsaffected = 1)
 BEGIN
- SET @output += @b + 'SET NOCOUNT OFF'
- SET @output += @b + 'GO'
+ SET @output +=      'SET NOCOUNT OFF'
+ SET @output += @b + @batch_separator
+ SET @output += @b
 END
 
-SET @output += @b + ''
-SET @output += @b + ''
 
 IF @results_to_text = 1
 BEGIN
