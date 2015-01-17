@@ -36,7 +36,8 @@ CREATE PROCEDURE dbo.sp_generate_merge
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
  @inlude_column_list_comment bit = 1, --Includes a comment with a list of columns in the MERGE statement.
- @case_sensitive bit = 1 --Use SQL_Latin1_General_CP1_CS_AS collation to allow changes in case to cause an update.
+ @case_sensitive bit = 1, --Use SQL_Latin1_General_CP1_CS_AS collation to allow changes in case to cause an update.
+ @batch_separator VARCHAR(50) = 'GO' -- Batch separator to use
 )
 AS
 BEGIN
@@ -509,7 +510,7 @@ IF @debug_mode =1
 IF (@include_use_db = 1)
 BEGIN
 	SET @output +=      'USE ' + DB_NAME()
-	SET @output += @b + 'GO'
+	SET @output += @b + @batch_separator
 	SET @output += @b + @b
 END
 
@@ -607,7 +608,7 @@ BEGIN
  SET @output += @b + ' BEGIN'
  SET @output += @b + ' PRINT ''' + @Target_Table_For_Output + ' rows affected by MERGE: '' + CAST(@mergeCount AS VARCHAR(100));';
  SET @output += @b + ' END'
- SET @output += @b + 'GO'
+ SET @output += @b + @batch_separator
  SET @output += @b + @b
 END
 
@@ -615,7 +616,7 @@ END
 IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT NULL)
  BEGIN
  SET @output +=      'ALTER TABLE ' + @Target_Table_For_Output + ' CHECK CONSTRAINT ALL' --Code to enable the previously disabled constraints
- SET @output += @b + 'GO'
+ SET @output += @b + @batch_separator
  SET @output += @b
  END
 
@@ -624,14 +625,14 @@ IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT 
 IF (LEN(@IDN) <> 0)
  BEGIN
  SET @output +=      'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' OFF'
- SET @output += @b + 'GO'
+ SET @output += @b + @batch_separator
  SET @output += @b
  END
 
 IF (@include_rowsaffected = 1)
 BEGIN
  SET @output +=      'SET NOCOUNT OFF'
- SET @output += @b + 'GO'
+ SET @output += @b + @batch_separator
  SET @output += @b
 END
 
