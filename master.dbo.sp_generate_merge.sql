@@ -359,6 +359,9 @@ WHILE @Column_ID IS NOT NULL
  WHEN @Data_Type IN ('ntext') 
  THEN 
  'COALESCE('''''''' + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')' 
+ WHEN @Data_Type IN ('xml') 
+ THEN 
+ 'COALESCE('''''''' + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')' 
  WHEN @Data_Type IN ('binary','varbinary') 
  THEN 
  'COALESCE(RTRIM(CONVERT(char,' + 'CONVERT(int,' + @Column_Name + '))),''NULL'')' 
