@@ -374,6 +374,9 @@ WHILE @Column_ID IS NOT NULL
  WHEN @Data_Type IN ('float','real','money','smallmoney')
  THEN
  'COALESCE(LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ',2)' + ')),''NULL'')' 
+ WHEN @Data_Type IN ('hierarchyid')
+ THEN 
+  'COALESCE(''hierarchyid::Parse(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))+''''''''+'')'',''NULL'')' 
  ELSE 
  'COALESCE(LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + ')),''NULL'')' 
  END + '+' + ''',''' + ' + '
