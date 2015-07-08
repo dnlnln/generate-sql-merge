@@ -347,7 +347,7 @@ WHILE @Column_ID IS NOT NULL
  WHEN @Data_Type IN ('varchar','nvarchar') 
  THEN 
  'COALESCE('''''''' + REPLACE(' + @Column_Name + ','''''''','''''''''''')+'''''''',''NULL'')'
- WHEN @Data_Type IN ('datetime','smalldatetime','datetime2') 
+ WHEN @Data_Type IN ('datetime','smalldatetime','datetime2','date') 
  THEN 
  'COALESCE('''''''' + RTRIM(CONVERT(char,' + @Column_Name + ',127))+'''''''',''NULL'')'
  WHEN @Data_Type IN ('uniqueidentifier') 
