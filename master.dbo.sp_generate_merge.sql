@@ -352,7 +352,7 @@ WHILE @Column_ID IS NOT NULL
  'COALESCE('''''''' + RTRIM(CONVERT(char,' + @Column_Name + ',127))+'''''''',''NULL'')'
  WHEN @Data_Type IN ('uniqueidentifier') 
  THEN 
- 'COALESCE('''''''' + REPLACE(RTRIM(CONVERT(char(255),' + @Column_Name + ')),'''''''','''''''''''')+'''''''',''NULL'')'
+ 'COALESCE('''''''' + REPLACE(CONVERT(char(36),RTRIM(' + @Column_Name + ')),'''''''','''''''''''')+'''''''',''NULL'')'
  WHEN @Data_Type IN ('text') 
  THEN 
  'COALESCE('''''''' + REPLACE(CONVERT(varchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')' 
