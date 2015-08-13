@@ -29,6 +29,7 @@ CREATE PROC sp_generate_merge
  @cols_to_include varchar(8000) = NULL, -- List of columns to be included in the MERGE statement
  @cols_to_exclude varchar(8000) = NULL, -- List of columns to be excluded from the MERGE statement
  @update_only_if_changed bit = 1, -- When 1, only performs an UPDATE operation if an included column in a matched row has changed.
+ @delete_if_not_matched bit = 1, -- When 1, deletes unmatched source rows from target, when 0 source rows will only be used to update existing rows or insert new.
  @disable_constraints bit = 0, -- When 1, disables foreign key constraints and enables them after the MERGE statement
  @ommit_computed_cols bit = 0, -- When 1, computed columns will not be included in the MERGE statement
  @include_use_db bit = 1, -- When 1, includes a USE [DatabaseName] statement at the beginning of the generated batch
@@ -577,9 +578,11 @@ SET @output += @b + ' VALUES(' + REPLACE(@Column_List, '[', 'Source.[') + ')'
 
 
 --When NOT matched by source, DELETE the row
-SET @output += @b + 'WHEN NOT MATCHED BY SOURCE THEN '
-SET @output += @b + ' DELETE;'
-SET @output += @b + ''
+IF @delete_if_not_matched=1 BEGIN
+ SET @output += @b + 'WHEN NOT MATCHED BY SOURCE THEN '
+ SET @output += @b + ' DELETE'
+END;
+SET @output += @b + ';'
 SET @output += @b + @batch_separator
 
 --Display the number of affected rows to the user, or report if an error occurred---
