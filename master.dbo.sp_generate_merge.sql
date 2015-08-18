@@ -451,7 +451,7 @@ DECLARE @PK_column_joins VARCHAR(8000)
 SET @PK_column_list = ''
 SET @PK_column_joins = ''
 
-SELECT @PK_column_list = @PK_column_list + c.COLUMN_NAME + ', '
+SELECT @PK_column_list = @PK_column_list + '[' + c.COLUMN_NAME + '], '
 , @PK_column_joins = @PK_column_joins + 'Target.[' + c.COLUMN_NAME + '] = Source.[' + c.COLUMN_NAME + '] AND '
 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk ,
 INFORMATION_SCHEMA.KEY_COLUMN_USAGE c
