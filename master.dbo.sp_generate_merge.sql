@@ -36,6 +36,8 @@ CREATE PROC sp_generate_merge
  @results_to_text bit = 0, -- When 1, outputs results to grid/messages window. When 0, outputs MERGE statement in an XML fragment.
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
+ @pageNum int = 0, -- When 0, no paging process
+ @pageSize int = 5000, -- Use this parameter to limit paging size
  @batch_separator VARCHAR(50) = 'GO' -- Batch separator to use
 )
 AS
@@ -474,11 +476,14 @@ SET @PK_column_joins = LEFT(@PK_column_joins, LEN(@PK_column_joins) -4)
 
 --Forming the final string that will be executed, to output the a MERGE statement
 SET @Actual_Values = 
- 'SELECT ' + 
+ 'WITH TableValues AS (SELECT ROW_NUMBER() OVER (ORDER BY ' + @PK_column_list + ') AS RowNo, ' + 
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
  '''' + 
- ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + @PK_column_list + ') = 1 THEN '' '' ELSE '','' END + ''(''+ ' + @Actual_Values + '+'')''' + ' ' + 
- COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK)')
+ ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + @PK_column_list + ') = 1 THEN '' '' ELSE '','' END + ''(''+ ' + @Actual_Values + '+'')''' + ' AS Data' + 
+ COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK)') + ')'
+
+ SET @Actual_Values = @Actual_Values + ' SELECT Data FROM TableValues' +
+ CASE WHEN @pageNum > 0 THEN ' WHERE RowNo BETWEEN ' + CONVERT(char,(@pageNum - 1) * @pageSize + 1) + ' AND ' + CONVERT(char,@pageNum * @pageSize) + ' ' ELSE ' ' END
 
  DECLARE @output VARCHAR(MAX) = ''
  DECLARE @b CHAR(1) = CHAR(13)
