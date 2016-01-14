@@ -36,7 +36,8 @@ CREATE PROC sp_generate_merge
  @results_to_text bit = 0, -- When 1, outputs results to grid/messages window. When 0, outputs MERGE statement in an XML fragment.
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
- @batch_separator VARCHAR(50) = 'GO' -- Batch separator to use
+ @batch_separator VARCHAR(50) = 'GO', -- Batch separator to use
+ @source_as_temp_table bit = 0 -- When 1, insert source into a temp table first and use it for merge query source, which will avoid 'query processor ran out of internal resources' when too many records in the merge body
 )
 AS
 BEGIN
@@ -238,7 +239,7 @@ ELSE
 DECLARE @Column_ID int, 
  @Column_List varchar(8000), 
  @Column_List_For_Update varchar(8000), 
- @Column_List_For_Check varchar(8000), 
+ @Column_List_For_Check varchar(max), 
  @Column_Name varchar(128), 
  @Column_Name_Unquoted varchar(128), 
  @Data_Type varchar(128), 
@@ -477,10 +478,11 @@ SET @Actual_Values =
  'SELECT ' + 
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
  '''' + 
- ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + @PK_column_list + ') = 1 THEN '' '' ELSE '','' END + ''(''+ ' + @Actual_Values + '+'')''' + ' ' + 
+ ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + @PK_column_list + ') = 1 THEN '' '' ELSE ' + CASE WHEN @source_as_temp_table = 0 THEN ''',''' ELSE ''' UNION ALL ''' END + ' END' + CASE WHEN @source_as_temp_table = 0 THEN '+ ''(''+ ' ELSE ' + '' SELECT '' + ' END + @Actual_Values + CASE WHEN @source_as_temp_table = 0 THEN '+'')''' ELSE '' END + ' ' + 
  COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK)')
 
  DECLARE @output VARCHAR(MAX) = ''
+ DECLARE @datasource VARCHAR(MAX) = ''
  DECLARE @b CHAR(1) = CHAR(13)
 
 --Determining whether to ouput any debug information
@@ -523,26 +525,11 @@ IF (@include_rowsaffected = 1) -- If the caller has elected not to include the "
  SET @output += @b + 'SET NOCOUNT ON'
  SET @output += @b + ''
 
-
---Determining whether to print IDENTITY_INSERT or not
-IF (LEN(@IDN) <> 0)
- BEGIN
- SET @output += @b + 'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' ON'
- SET @output += @b + ''
- END
-
-
 --Temporarily disable constraints on the target table
 IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT NULL)
  BEGIN
  SET @output += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' NOCHECK CONSTRAINT ALL' --Code to disable constraints temporarily
  END
-
-
---Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
-SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS Target'
-SET @output += @b + 'USING (VALUES'
-
 
 --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
 DECLARE @tab TABLE (val NVARCHAR(max));
@@ -551,7 +538,51 @@ EXEC (@Actual_Values)
 
 IF (SELECT COUNT(*) FROM @tab) <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
 BEGIN
- SET @output += CAST((SELECT @b + val FROM @tab FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
+	IF @source_as_temp_table = 1
+	BEGIN
+		SET @datasource += CAST((SELECT @b + val FROM @tab FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
+	END
+	ELSE BEGIN
+		SET @datasource += CAST((SELECT @b + val FROM @tab FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
+	END
+END
+
+IF @source_as_temp_table = 1
+BEGIN	SET @output += @b + 'SELECT '+ @Column_List +' INTO #temp' + @table_name + ' FROM ' + @Source_Table_Qualified + ' WHERE 1 <> 1'
+	IF (LEN(@IDN) <> 0)
+	 BEGIN
+		 SET @output += @b + ''
+		 SET @output += @b + 'SET IDENTITY_INSERT #temp' + @table_name + ' ON'
+		 SET @output += @b + ''
+	 END
+	SET @output += @b + 'INSERT INTO #temp' + @table_name + ' (' + @Column_List + ') '
+
+	SET @output += @b + @datasource
+
+	IF (LEN(@IDN) <> 0)
+	 BEGIN
+		 SET @output += @b + ''
+		 SET @output += @b + 'SET IDENTITY_INSERT #temp' + @table_name + ' OFF'
+		 SET @output += @b + ''
+	 END
+END
+
+--Determining whether to print IDENTITY_INSERT or not
+IF (LEN(@IDN) <> 0)
+ BEGIN
+ SET @output += @b + 'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' ON'
+ SET @output += @b + ''
+END
+
+--Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
+SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS Target'
+
+IF @source_as_temp_table = 1
+BEGIN
+	SET @output += @b + 'USING (SELECT ' + @Column_List + ' FROM #temp' + @table_name
+END
+ELSE BEGIN
+	SET @output += @b + 'USING (VALUES' + @datasource
 END
 
 --Output the columns to correspond with each of the values above--------------------
@@ -629,6 +660,11 @@ END
 
 SET @output += @b + ''
 SET @output += @b + ''
+
+IF @source_as_temp_table = 1
+BEGIN
+	SET @output += @b + 'DROP TABLE #temp' + @table_name
+END
 
 IF @results_to_text = 1
 BEGIN
