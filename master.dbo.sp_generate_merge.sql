@@ -1,10 +1,6 @@
 SET NOCOUNT ON
 GO
 
-PRINT 'Using Master database'
-USE master
-GO
-
 PRINT 'Checking for the existence of this procedure'
 IF (SELECT OBJECT_ID('sp_generate_merge','P')) IS NOT NULL --means, the procedure already exists
  BEGIN
@@ -37,7 +33,12 @@ CREATE PROC sp_generate_merge
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
  @batch_separator VARCHAR(50) = 'GO', -- Batch separator to use
- @source_as_temp_table bit = 0 -- When 1, insert source into a temp table first and use it for merge query source, which will avoid 'query processor ran out of internal resources' when too many records in the merge body
+ @source_as_temp_table bit = 0, -- When 1, insert source into a temp table first and use it for merge query source, which will avoid 'query processor ran out of internal resources' when too many records in the merge body
+ @new_identity_in_temp_table bit = 0, -- Only take effect when @source_as_temp_table is 1, when this is 1, the new temp table as the source will generate a new identity column, old one will be only used for reference, so that extra work can be done to remapping without identity_insert
+ @different_join_columns varchar(8000) = NULL, -- only if you need the merge to matching record not by PK but something else
+ @script_before_merge varchar(8000) = NULL,
+ @script_after_merge varchar(8000) = NULL,
+ @drop_temp_table bit = 1
 )
 AS
 BEGIN
@@ -309,7 +310,7 @@ WHILE @Column_ID IS NOT NULL
  --Making sure to output SET IDENTITY_INSERT ON/OFF in case the table has an IDENTITY column
  IF (SELECT COLUMNPROPERTY( OBJECT_ID(@Source_Table_Qualified),SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsIdentity')) = 1 
  BEGIN
- IF @ommit_identity = 0 --Determing whether to include or exclude the IDENTITY column
+  IF @ommit_identity = 0 OR @new_identity_in_temp_table = 1 --Determing whether to include or exclude the IDENTITY column
  SET @IDN = @Column_Name
  ELSE
  GOTO SKIP_LOOP 
@@ -469,9 +470,32 @@ IF IsNull(@PK_column_list, '') = ''
  RETURN -1 --Failure. Reason: looks like table doesn't have any primary keys
  END
 
+IF IsNull(@different_join_columns , '') <> ''
+BEGIN
+	SET @PK_column_list = ''
+	SET @PK_column_joins = ''
+
+	DECLARE @pos INT
+	DECLARE @len INT
+	DECLARE @value varchar(8000)
+
+	set @pos = 0
+	set @len = 0
+
+	WHILE CHARINDEX(',', @different_join_columns, @pos+1)>0
+	BEGIN
+		set @len = CHARINDEX(',', @different_join_columns, @pos+1) - @pos
+		set @value = SUBSTRING(@different_join_columns, @pos, @len)
+
+		SET @PK_column_list = @PK_column_list + '[' + @value + '], '
+        SET @PK_column_joins = @PK_column_joins + 'Target.[' + @value + '] = Source.[' + @value + '] AND '
+	    
+		set @pos = CHARINDEX(',', @different_join_columns, @pos+@len) +1
+	END	
+END
+
 SET @PK_column_list = LEFT(@PK_column_list, LEN(@PK_column_list) -1)
 SET @PK_column_joins = LEFT(@PK_column_joins, LEN(@PK_column_joins) -4)
-
 
 --Forming the final string that will be executed, to output the a MERGE statement
 SET @Actual_Values = 
@@ -548,8 +572,16 @@ BEGIN
 END
 
 IF @source_as_temp_table = 1
-BEGIN	SET @output += @b + 'SELECT '+ @Column_List +' INTO #temp' + @table_name + ' FROM ' + @Source_Table_Qualified + ' WHERE 1 <> 1'
-	IF (LEN(@IDN) <> 0)
+BEGIN
+	IF @new_identity_in_temp_table = 0
+	BEGIN
+		SET @output += @b + 'SELECT '+ @Column_List +' INTO #temp' + @table_name + ' FROM ' + @Source_Table_Qualified + ' WHERE 1 <> 1'
+	END
+	ELSE BEGIN
+		SET @output += @b + 'SELECT IDENTITY (int, 1,1) AS CopyMappingID,' + REPLACE ( @Column_List , '[' , 'T1.[' ) +' INTO #temp' + @table_name + ' FROM ' + @Source_Table_Qualified + @b + ' AS T1 LEFT JOIN ' + @Source_Table_Qualified + ' AS T2 ON 1=0 WHERE 1 <> 1'
+	END
+	
+	IF (LEN(@IDN) <> 0 AND @new_identity_in_temp_table = 0)
 	 BEGIN
 		 SET @output += @b + ''
 		 SET @output += @b + 'SET IDENTITY_INSERT #temp' + @table_name + ' ON'
@@ -559,7 +591,7 @@ BEGIN	SET @output += @b + 'SELECT '+ @Column_List +' INTO #temp' + @table_name 
 
 	SET @output += @b + @datasource
 
-	IF (LEN(@IDN) <> 0)
+	IF (LEN(@IDN) <> 0 AND @new_identity_in_temp_table = 0)
 	 BEGIN
 		 SET @output += @b + ''
 		 SET @output += @b + 'SET IDENTITY_INSERT #temp' + @table_name + ' OFF'
@@ -567,11 +599,23 @@ BEGIN	SET @output += @b + 'SELECT '+ @Column_List +' INTO #temp' + @table_name 
 	 END
 END
 
+IF @new_identity_in_temp_table = 1 AND @ommit_identity = 1
+BEGIN
+	SET @Column_List = REPLACE ( @Column_List , '' + @IDN + ',' , '' )
+END
+
 --Determining whether to print IDENTITY_INSERT or not
-IF (LEN(@IDN) <> 0)
+IF (LEN(@IDN) <> 0 AND @ommit_identity = 0)
  BEGIN
  SET @output += @b + 'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' ON'
  SET @output += @b + ''
+END
+
+IF (@script_before_merge IS NOT NULL)
+BEGIN
+	SET @output += @b
+	SET @output += @script_before_merge
+	SET @output += @b + @batch_separator
 END
 
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
@@ -616,6 +660,14 @@ END;
 SET @output += @b + ';'
 SET @output += @b + @batch_separator
 
+
+IF (@script_after_merge IS NOT NULL)
+BEGIN
+	SET @output += @b
+	SET @output += @script_after_merge
+	SET @output += @b + @batch_separator
+END
+
 --Display the number of affected rows to the user, or report if an error occurred---
 IF @include_rowsaffected = 1
 BEGIN
@@ -644,7 +696,7 @@ IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT 
 
 
 --Switch-off identity inserting------------------------------------------------------
-IF (LEN(@IDN) <> 0)
+IF (LEN(@IDN) <> 0) AND @ommit_identity = 0
  BEGIN
  SET @output +=      'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' OFF'
  SET @output += @b + @batch_separator
@@ -661,7 +713,7 @@ END
 SET @output += @b + ''
 SET @output += @b + ''
 
-IF @source_as_temp_table = 1
+IF @source_as_temp_table = 1 AND @drop_temp_table = 1
 BEGIN
 	SET @output += @b + 'DROP TABLE #temp' + @table_name
 END
