@@ -605,7 +605,7 @@ BEGIN
 END
 
 --Determining whether to print IDENTITY_INSERT or not
-IF (LEN(@IDN) <> 0 AND @ommit_identity = 0)
+IF (LEN(@IDN) <> 0 AND @ommit_identity = 0 AND CHARINDEX('#', @Target_Table_For_Output) = 0 )
  BEGIN
  SET @output += @b + 'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' ON'
  SET @output += @b + ''
@@ -696,7 +696,7 @@ IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT 
 
 
 --Switch-off identity inserting------------------------------------------------------
-IF (LEN(@IDN) <> 0) AND @ommit_identity = 0
+IF (LEN(@IDN) <> 0) AND @ommit_identity = 0 AND CHARINDEX('#', @Target_Table_For_Output) = 0 
  BEGIN
  SET @output +=      'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' OFF'
  SET @output += @b + @batch_separator
