@@ -38,7 +38,8 @@ CREATE PROC sp_generate_merge
  @different_join_columns varchar(8000) = NULL, -- only if you need the merge to matching record not by PK but something else
  @script_before_merge varchar(8000) = NULL,
  @script_after_merge varchar(8000) = NULL,
- @drop_temp_table bit = 1
+ @drop_temp_table bit = 1,
+ @output_identity_into_temp bit = 0
 )
 AS
 BEGIN
@@ -604,8 +605,13 @@ BEGIN
 	SET @Column_List = REPLACE ( @Column_List , '' + @IDN + ',' , '' )
 END
 
+IF LEN(@IDN) <> 0 AND @source_as_temp_table = 1 AND @output_identity_into_temp=1 BEGIN
+  SET @output += @b + 'CREATE TABLE #temp' + @table_name + '_Identity_Mapping(' + @IDN + ' INT, ' + REPLACE(@IDN, ']', '_Source]') + ' INT);'
+  SET @output += @b + 'ALTER TABLE #temp' + @table_name + ' ADD '+ REPLACE(@IDN, ']', '_Source]') + ' INT;'
+END;
+
 --Determining whether to print IDENTITY_INSERT or not
-IF (LEN(@IDN) <> 0 AND @ommit_identity = 0 AND CHARINDEX('#', @Target_Table_For_Output) = 0 )
+IF (LEN(@IDN) <> 0 AND @ommit_identity = 0 AND CHARINDEX('#', @Target_Table_For_Output) = 0 AND @output_identity_into_temp = 0)
  BEGIN
  SET @output += @b + 'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' ON'
  SET @output += @b + ''
@@ -648,8 +654,8 @@ END
 
 --When NOT matched by target, perform an INSERT------------------------------------
 SET @output += @b + 'WHEN NOT MATCHED BY TARGET THEN';
-SET @output += @b + ' INSERT(' + @Column_List + ')'
-SET @output += @b + ' VALUES(' + REPLACE(@Column_List, '[', 'Source.[') + ')'
+SET @output += @b + ' INSERT(' + CASE WHEN @output_identity_into_temp = 1 THEN REPLACE(@Column_List, @IDN +',', '') ELSE @Column_List END + ')'
+SET @output += @b + ' VALUES(' + REPLACE(CASE WHEN @output_identity_into_temp = 1 THEN REPLACE(@Column_List, @IDN +',', '') ELSE @Column_List END, '[', 'Source.[') + ')'
 
 
 --When NOT matched by source, DELETE the row
@@ -657,6 +663,11 @@ IF @delete_if_not_matched=1 BEGIN
  SET @output += @b + 'WHEN NOT MATCHED BY SOURCE THEN '
  SET @output += @b + ' DELETE'
 END;
+
+IF LEN(@IDN) <> 0 AND @source_as_temp_table = 1 AND @output_identity_into_temp=1 BEGIN
+ SET @output += @b + 'OUTPUT inserted.' + @IDN + ',Source.' + @IDN + ' AS ' + REPLACE(@IDN, ']', '_Source]') + ' INTO #temp' + @table_name + '_Identity_Mapping;'
+END;
+
 SET @output += @b + ';'
 SET @output += @b + @batch_separator
 
@@ -686,6 +697,10 @@ BEGIN
  SET @output += @b + @b
 END
 
+IF LEN(@IDN) <> 0 AND @source_as_temp_table = 1 AND @output_identity_into_temp=1 BEGIN
+ SET @output += @b + 'UPDATE T SET T.' + REPLACE(@IDN, ']', '_Source]') + ' = T1.' + REPLACE(@IDN, ']', '_Source], T.') + @IDN + ' = T1.' + @IDN + ' FROM #temp' + @table_name + ' AS T JOIN #temp' + @table_name + '_Identity_Mapping AS T1 ON T.' + @IDN + ' = T1.' + REPLACE(@IDN, ']', '_Source];')
+ SET @output += @b + 'DROP TABLE #temp' + @table_name + '_Identity_Mapping;'
+END;
 --Re-enable the previously disabled constraints-------------------------------------
 IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT NULL)
  BEGIN
@@ -696,7 +711,7 @@ IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT 
 
 
 --Switch-off identity inserting------------------------------------------------------
-IF (LEN(@IDN) <> 0) AND @ommit_identity = 0 AND CHARINDEX('#', @Target_Table_For_Output) = 0 
+IF (LEN(@IDN) <> 0) AND @ommit_identity = 0 AND CHARINDEX('#', @Target_Table_For_Output) = 0 AND @new_identity_in_temp_table = 0
  BEGIN
  SET @output +=      'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' OFF'
  SET @output += @b + @batch_separator
