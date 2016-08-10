@@ -15,7 +15,7 @@ CREATE PROC sp_generate_merge
 (
  @table_name varchar(776), -- The table/view for which the MERGE statement will be generated using the existing data
  @target_table varchar(776) = NULL, -- Use this parameter to specify a different table name into which the data will be inserted/updated/deleted
- @from varchar(800) = NULL, -- Use this parameter to filter the rows based on a filter condition (using WHERE)
+ @from varchar(max) = NULL, -- Use this parameter to filter the rows based on a filter condition (using WHERE)
  @include_timestamp bit = 0, -- Specify 1 for this parameter, if you want to include the TIMESTAMP/ROWVERSION column's data in the MERGE statement
  @debug_mode bit = 0, -- If @debug_mode is set to 1, the SQL statements constructed by this procedure will be printed for later examination
  @schema varchar(64) = NULL, -- Use this parameter if you are not the owner of the table
@@ -492,7 +492,7 @@ BEGIN
 		SET @PK_column_list = @PK_column_list + '[' + @value + '], '
 		IF @different_join_nullable_columns IS NOT NULL AND CHARINDEX(@value, @different_join_nullable_columns) > 0
 		BEGIN
-			SET @PK_column_joins = '(' + @PK_column_joins + 'Target.[' + @value + '] = Source.[' + @value + '] OR Target.[' + @value + '] IS NULL AND Source.[' + @value + '] IS NULL) AND '
+			SET @PK_column_joins = @PK_column_joins + '(Target.[' + @value + '] = Source.[' + @value + '] OR Target.[' + @value + '] IS NULL AND Source.[' + @value + '] IS NULL) AND '
 		END
 		ELSE BEGIN
 			SET @PK_column_joins = @PK_column_joins + 'Target.[' + @value + '] = Source.[' + @value + '] AND '
