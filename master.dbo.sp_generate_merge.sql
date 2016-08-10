@@ -616,7 +616,7 @@ BEGIN
 END
 
 IF LEN(@IDN) <> 0 AND @source_as_temp_table = 1 AND @output_identity_into_temp=1 BEGIN
-  SET @output += @b + 'CREATE TABLE #temp' + @table_name + '_Identity_Mapping(' + @IDN + ' INT, ' + REPLACE(@IDN, ']', '_Source]') + ' INT);'
+  SET @output += @b + 'CREATE TABLE #temp' + @table_name + '_Identity_Mapping(' + @IDN + ' INT, ' + REPLACE(@IDN, ']', '_Source]') + ' INT, Action Varchar(10));'
   SET @output += @b + 'ALTER TABLE #temp' + @table_name + ' ADD '+ REPLACE(@IDN, ']', '_Source]') + ' INT;'
 END;
 
@@ -675,7 +675,7 @@ IF @delete_if_not_matched=1 BEGIN
 END;
 
 IF LEN(@IDN) <> 0 AND @source_as_temp_table = 1 AND @output_identity_into_temp=1 BEGIN
- SET @output += @b + 'OUTPUT inserted.' + @IDN + ',Source.' + @IDN + ' AS ' + REPLACE(@IDN, ']', '_Source]') + ' INTO #temp' + @table_name + '_Identity_Mapping;'
+ SET @output += @b + 'OUTPUT inserted.' + @IDN + ',Source.' + @IDN + ' AS ' + REPLACE(@IDN, ']', '_Source], $action AS Action') + ' INTO #temp' + @table_name + '_Identity_Mapping;'
 END;
 
 SET @output += @b + ';'
@@ -708,6 +708,11 @@ BEGIN
 END
 
 IF LEN(@IDN) <> 0 AND @source_as_temp_table = 1 AND @output_identity_into_temp=1 BEGIN
+SET @output += @b + 'DECLARE @lInsertedCount INT, @lUpdatedCount INT, @lDeletedCount INT'
+	SET @output += @b + 'SELECT @lInsertedCount = SUM(CASE WHEN A.Action = ''INSERT'' THEN 1 ELSE 0 END), @lUpdatedCount = SUM(CASE WHEN A.Action = ''UPDATE'' THEN 1 ELSE 0 END), @lDeletedCount = SUM(CASE WHEN A.Action = ''DELETE'' THEN 1 ELSE 0 END)  FROM #temp' + @table_name + '_Identity_Mapping AS A;'
+	SET @output += @b + ' PRINT ''' + @Target_Table_For_Output + ' inserted by MERGE: '' + CAST(@lInsertedCount AS VARCHAR(100)) + '',  updated by MERGE:'' + CAST(@lUpdatedCount AS VARCHAR(100)) + '',  deleted by MERGE:'' + CAST(@lDeletedCount AS VARCHAR(100));';
+	SET @output += @b + @batch_separator
+	SET @output += @b + @b
  SET @output += @b + 'UPDATE T SET T.' + REPLACE(@IDN, ']', '_Source]') + ' = T1.' + REPLACE(@IDN, ']', '_Source], T.') + @IDN + ' = T1.' + @IDN + ' FROM #temp' + @table_name + ' AS T JOIN #temp' + @table_name + '_Identity_Mapping AS T1 ON T.' + @IDN + ' = T1.' + REPLACE(@IDN, ']', '_Source];')
  SET @output += @b + 'DROP TABLE #temp' + @table_name + '_Identity_Mapping;'
 END;
