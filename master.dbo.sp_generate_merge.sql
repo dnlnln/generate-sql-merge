@@ -36,6 +36,7 @@ CREATE PROC sp_generate_merge
  @source_as_temp_table bit = 0, -- When 1, insert source into a temp table first and use it for merge query source, which will avoid 'query processor ran out of internal resources' when too many records in the merge body
  @new_identity_in_temp_table bit = 0, -- Only take effect when @source_as_temp_table is 1, when this is 1, the new temp table as the source will generate a new identity column, old one will be only used for reference, so that extra work can be done to remapping without identity_insert
  @different_join_columns varchar(8000) = NULL, -- only if you need the merge to matching record not by PK but something else
+ @different_join_nullable_columns varchar(8000) = NULL,
  @script_before_merge varchar(8000) = NULL,
  @script_after_merge varchar(8000) = NULL,
  @drop_temp_table bit = 1,
@@ -489,7 +490,13 @@ BEGIN
 		set @value = SUBSTRING(@different_join_columns, @pos, @len)
 
 		SET @PK_column_list = @PK_column_list + '[' + @value + '], '
-        SET @PK_column_joins = @PK_column_joins + 'Target.[' + @value + '] = Source.[' + @value + '] AND '
+		IF @different_join_nullable_columns IS NOT NULL AND CHARINDEX(@value, @different_join_nullable_columns) > 0
+		BEGIN
+			SET @PK_column_joins = '(' + @PK_column_joins + 'Target.[' + @value + '] = Source.[' + @value + '] OR Target.[' + @value + '] IS NULL AND Source.[' + @value + '] IS NULL) AND '
+		END
+		ELSE BEGIN
+			SET @PK_column_joins = @PK_column_joins + 'Target.[' + @value + '] = Source.[' + @value + '] AND '
+		END
 	    
 		set @pos = CHARINDEX(',', @different_join_columns, @pos+@len) +1
 	END	
@@ -588,9 +595,12 @@ BEGIN
 		 SET @output += @b + 'SET IDENTITY_INSERT #temp' + @table_name + ' ON'
 		 SET @output += @b + ''
 	 END
-	SET @output += @b + 'INSERT INTO #temp' + @table_name + ' (' + @Column_List + ') '
+	IF (SELECT COUNT(*) FROM @tab) <> 0
+	BEGIN
+		SET @output += @b + 'INSERT INTO #temp' + @table_name + ' (' + @Column_List + ') '
 
-	SET @output += @b + @datasource
+		SET @output += @b + @datasource
+	END
 
 	IF (LEN(@IDN) <> 0 AND @new_identity_in_temp_table = 0)
 	 BEGIN
