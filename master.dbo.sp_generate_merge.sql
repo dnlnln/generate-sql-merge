@@ -40,7 +40,8 @@ CREATE PROC sp_generate_merge
  @script_before_merge varchar(8000) = NULL,
  @script_after_merge varchar(8000) = NULL,
  @drop_temp_table bit = 1,
- @output_identity_into_temp bit = 0
+ @output_identity_into_temp bit = 0,
+ @ignore_duplicates_for_update bit = 0
 )
 AS
 BEGIN
@@ -639,14 +640,20 @@ SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS Target'
 
 IF @source_as_temp_table = 1
 BEGIN
-	SET @output += @b + 'USING (SELECT ' + @Column_List + ' FROM #temp' + @table_name
+	IF @ignore_duplicates_for_update = 0
+	BEGIN
+		SET @output += @b + 'USING (SELECT ' + @Column_List + ' FROM #temp' + @table_name
+	END
+	ELSE BEGIN
+		SET @output += @b + 'USING (SELECT ROW_NUMBER() OVER(PARTITION BY ' + @Column_List + ' ORDER BY ' + @IDN + ' DESC) AS RowNum,' + @Column_List + ' FROM #temp' + @table_name
+	END
 END
 ELSE BEGIN
 	SET @output += @b + 'USING (VALUES' + @datasource
 END
 
 --Output the columns to correspond with each of the values above--------------------
-SET @output += @b + ') AS Source (' + @Column_List + ')'
+SET @output += @b + ') AS Source (' + CASE WHEN @source_as_temp_table = 1 AND @ignore_duplicates_for_update = 1 THEN 'RowNum,' ELSE '' END + @Column_List + ')'
 
 
 --Output the join columns ----------------------------------------------------------
@@ -656,7 +663,7 @@ SET @output += @b + 'ON (' + @PK_column_joins + ')'
 --When matched, perform an UPDATE on any metadata columns only (ie. not on PK)------
 IF LEN(@Column_List_For_Update) <> 0
 BEGIN
- SET @output += @b + 'WHEN MATCHED ' + CASE WHEN @update_only_if_changed = 1 THEN 'AND (' + @Column_List_For_Check + ') ' ELSE '' END + 'THEN'
+ SET @output += @b + 'WHEN MATCHED ' + CASE WHEN @update_only_if_changed = 1 THEN 'AND (' + @Column_List_For_Check + ') ' ELSE '' END  + CASE WHEN @ignore_duplicates_for_update = 1 AND @source_as_temp_table = 1 THEN 'AND RowNum = 1 ' ELSE '' END + 'THEN'
  SET @output += @b + ' UPDATE SET'
  SET @output += @b + '  ' + LTRIM(@Column_List_For_Update)
 END
