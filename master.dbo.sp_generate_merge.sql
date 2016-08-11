@@ -645,7 +645,7 @@ BEGIN
 		SET @output += @b + 'USING (SELECT ' + @Column_List + ' FROM #temp' + @table_name
 	END
 	ELSE BEGIN
-		SET @output += @b + 'USING (SELECT ROW_NUMBER() OVER(PARTITION BY ' + @Column_List + ' ORDER BY ' + @IDN + ' DESC) AS RowNum,' + @Column_List + ' FROM #temp' + @table_name
+		SET @output += @b + 'USING (SELECT ROW_NUMBER() OVER(PARTITION BY ' + REPLACE(@Column_List, @IDN +',', '') + ' ORDER BY ' + @IDN + ' DESC) AS RowNum,' + @Column_List + ' FROM #temp' + @table_name
 	END
 END
 ELSE BEGIN
