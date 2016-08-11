@@ -1,6 +1,10 @@
 SET NOCOUNT ON
 GO
 
+--PRINT 'Using Master database'
+--USE master
+--GO
+
 PRINT 'Checking for the existence of this procedure'
 IF (SELECT OBJECT_ID('sp_generate_merge','P')) IS NOT NULL --means, the procedure already exists
  BEGIN
