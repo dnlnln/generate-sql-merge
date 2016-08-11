@@ -20,7 +20,7 @@ The generated MERGE statement populates the target table to match the source dat
 When the generated MERGE statement is executed, the following logic is applied based on whether a match is found:
 
 - If the source row does not exist in the target table, an `INSERT` is performed
-- If a given row in the target table does not exist in the source, a `DELETE` is performed
+- If a given row in the target table does not exist in the source, a `DELETE` is performed (causing huge slowness)
 - If the source row already exists in the target table and has changed, an `UPDATE` is performed
 - If the source row already exists in the target table but the data has not changed, no action is performed (configurable)
 
@@ -46,7 +46,7 @@ I would also like to acknowledge:
  
 ## Installation
 Simply execute the script, which will install it in `[master]` database as a system procedure (making it executable within user databases).
-
+The use master is currently removed from it in case login limitation won't allow creation in master, create in user database works too.
 
 ## Known Limitations
 This procedure has explicit support for the following datatypes: (small)datetime(2), (n)varchar, (n)text, (n)char, int, float, real, (small)money, timestamp, rowversion, uniqueidentifier and (var)binary. All others are implicitly converted to their CHAR representations so YMMV depending on the datatype. Additionally, this procedure has not been extensively tested with UNICODE datatypes.
