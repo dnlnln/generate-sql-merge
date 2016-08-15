@@ -675,8 +675,8 @@ END
 
 --When NOT matched by target, perform an INSERT------------------------------------
 SET @output += @b + 'WHEN NOT MATCHED BY TARGET THEN';
-SET @output += @b + ' INSERT(' + CASE WHEN @output_identity_into_temp = 1 THEN REPLACE(@Column_List, @IDN +',', '') ELSE @Column_List END + ')'
-SET @output += @b + ' VALUES(' + REPLACE(CASE WHEN @output_identity_into_temp = 1 THEN REPLACE(@Column_List, @IDN +',', '') ELSE @Column_List END, '[', 'Source.[') + ')'
+SET @output += @b + ' INSERT(' + CASE WHEN @output_identity_into_temp = 1 AND LEN(@IDN) > 0 THEN REPLACE(@Column_List, @IDN +',', '') ELSE @Column_List END + ')'
+SET @output += @b + ' VALUES(' + REPLACE(CASE WHEN @output_identity_into_temp = 1 AND LEN(@IDN) > 0 THEN REPLACE(@Column_List, @IDN +',', '') ELSE @Column_List END, '[', 'Source.[') + ')'
 
 
 --When NOT matched by source, DELETE the row
