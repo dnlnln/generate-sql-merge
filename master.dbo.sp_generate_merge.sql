@@ -410,6 +410,8 @@ WHILE @Column_ID IS NOT NULL
  AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
  AND c.CONSTRAINT_NAME = pk.CONSTRAINT_NAME
  AND c.COLUMN_NAME = @Column_Name_Unquoted 
+ UNION
+ SELECT 1 WHERE @IDN = @Column_Name
  )
  BEGIN
  SET @Column_List_For_Update = @Column_List_For_Update + @Column_Name + ' = Source.' + @Column_Name + ', 
