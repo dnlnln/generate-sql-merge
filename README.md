@@ -113,6 +113,7 @@ GO
 
 I want to export one certain set of data from A(Id, Code, Column1, Column2) and B(Id, AId, Data1, Data2), which is a 1-N mapping, when applying on a different DB I would like remain the relationship between them but not using identity insert, based on that in A table there are other columns is unique enough to match the target
 
+```
 DECLARE @from_query VARCHAR(max) = 'from A where Id IN (' + @sIdString + ')'
 EXEC sp_generate_merge 'A', @include_use_db = 0,  @source_as_temp_table = 1, @ommit_identity = 0, @results_to_text =1,
 		@from = @from_query, @delete_if_not_matched = 0, @update_only_if_changed = 0,
@@ -121,7 +122,7 @@ EXEC sp_generate_merge 'A', @include_use_db = 0,  @source_as_temp_table = 1, @om
 		@script_after_merge = '',
 		@drop_temp_table = 0, @output_identity_into_temp = 1
 
-----------------------------------------------------WP_Web_Policy_Air-----------------------------------------------------------
+
 SET @from_query = 'from B where Id IN (' + @sBIdString + ')'
 EXEC sp_generate_merge 'B', @include_use_db = 0,  @source_as_temp_table = 1, @ommit_identity = 0, @results_to_text =1,
 		@from = @from_query, @delete_if_not_matched = 0,  @update_only_if_changed = 0,
@@ -134,3 +135,4 @@ EXEC sp_generate_merge 'B', @include_use_db = 0,  @source_as_temp_table = 1, @om
 										ON T1.[Id_Source] = T.[AId];',
 		@script_after_merge = '',
 		@drop_temp_table = 0, @output_identity_into_temp = 1, @ignore_duplicates_for_update = 1
+```
