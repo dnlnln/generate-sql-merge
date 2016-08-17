@@ -45,7 +45,8 @@ CREATE PROC sp_generate_merge
  @script_after_merge varchar(8000) = NULL,
  @drop_temp_table bit = 1,
  @output_identity_into_temp bit = 0,
- @ignore_duplicates_for_update bit = 0
+ @ignore_duplicates_for_update bit = 0,
+ @columns_order_by varchar(8000) = NULL
 )
 AS
 BEGIN
@@ -517,8 +518,8 @@ SET @Actual_Values =
  'SELECT ' + 
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
  '''' + 
- ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + @PK_column_list + ') = 1 THEN '' '' ELSE ' + CASE WHEN @source_as_temp_table = 0 THEN ''',''' ELSE ''' UNION ALL ''' END + ' END' + CASE WHEN @source_as_temp_table = 0 THEN '+ ''(''+ ' ELSE ' + '' SELECT '' + ' END + @Actual_Values + CASE WHEN @source_as_temp_table = 0 THEN '+'')''' ELSE '' END + ' ' + 
- COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ORDER BY ' + @PK_column_list)
+ ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list) + ') = 1 THEN '' '' ELSE ' + CASE WHEN @source_as_temp_table = 0 THEN ''',''' ELSE ''' UNION ALL ''' END + ' END' + CASE WHEN @source_as_temp_table = 0 THEN '+ ''(''+ ' ELSE ' + '' SELECT '' + ' END + @Actual_Values + CASE WHEN @source_as_temp_table = 0 THEN '+'')''' ELSE '' END + ' ' + 
+ COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ') + CASE WHEN @from IS NOT NULL AND CHARINDEX(@from, 'ORDER BY') > 0 THEN '' ELSE  ' ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list) END
 
  DECLARE @output VARCHAR(MAX) = ''
  DECLARE @datasource VARCHAR(MAX) = ''
