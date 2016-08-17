@@ -518,7 +518,7 @@ SET @Actual_Values =
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
  '''' + 
  ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + @PK_column_list + ') = 1 THEN '' '' ELSE ' + CASE WHEN @source_as_temp_table = 0 THEN ''',''' ELSE ''' UNION ALL ''' END + ' END' + CASE WHEN @source_as_temp_table = 0 THEN '+ ''(''+ ' ELSE ' + '' SELECT '' + ' END + @Actual_Values + CASE WHEN @source_as_temp_table = 0 THEN '+'')''' ELSE '' END + ' ' + 
- COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK)')
+ COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ORDER BY ' + @PK_column_list)
 
  DECLARE @output VARCHAR(MAX) = ''
  DECLARE @datasource VARCHAR(MAX) = ''
@@ -571,19 +571,13 @@ IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT 
  END
 
 --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
-DECLARE @tab TABLE (val NVARCHAR(max));
-INSERT INTO @tab
+DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max));
+INSERT INTO @tab (val)
 EXEC (@Actual_Values)
 
 IF (SELECT COUNT(*) FROM @tab) <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
 BEGIN
-	IF @source_as_temp_table = 1
-	BEGIN
-		SET @datasource += CAST((SELECT @b + val FROM @tab FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
-	END
-	ELSE BEGIN
-		SET @datasource += CAST((SELECT @b + val FROM @tab FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
-	END
+ SET @datasource += CAST((SELECT @b + val FROM @tab ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
 END
 
 IF @source_as_temp_table = 1
