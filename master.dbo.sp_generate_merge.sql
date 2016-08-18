@@ -643,10 +643,10 @@ IF @source_as_temp_table = 1
 BEGIN
 	IF @ignore_duplicates_for_update = 0
 	BEGIN
-		SET @output += @b + 'USING (SELECT ' + @Column_List + ' FROM #temp' + @table_name
+		SET @output += @b + 'USING (SELECT TOP 9223372036854775807 ' + @Column_List + ' FROM #temp' + @table_name + ' ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list)
 	END
 	ELSE BEGIN
-		SET @output += @b + 'USING (SELECT ROW_NUMBER() OVER(PARTITION BY ' + REPLACE(@Column_List, @IDN +',', '') + ' ORDER BY ' + @IDN + ' DESC) AS RowNum,' + @Column_List + ' FROM #temp' + @table_name
+		SET @output += @b + 'USING (SELECT TOP 9223372036854775807 ROW_NUMBER() OVER(PARTITION BY ' + REPLACE(@Column_List, @IDN +',', '') + ' ORDER BY ' + @IDN + ' DESC) AS RowNum,' + @Column_List + ' FROM #temp' + @table_name + ' ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list)
 	END
 END
 ELSE BEGIN
