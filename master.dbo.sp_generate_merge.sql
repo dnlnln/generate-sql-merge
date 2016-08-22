@@ -754,6 +754,8 @@ SET @output += @b + ''
 IF @source_as_temp_table = 1 AND @drop_temp_table = 1
 BEGIN
 	SET @output += @b + 'DROP TABLE #temp' + @table_name
+	SET @output += @b + @batch_separator
+	SET @output += @b
 END
 
 IF @results_to_text = 1
