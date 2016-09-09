@@ -46,7 +46,8 @@ CREATE PROC sp_generate_merge
  @drop_temp_table bit = 1,
  @output_identity_into_temp bit = 0,
  @ignore_duplicates_for_update bit = 0,
- @columns_order_by varchar(8000) = NULL
+ @columns_order_by varchar(8000) = NULL,
+ @split_query_for_source_temp_insert bit = 0 -- even with temp table as source, the union select that insert into the temp table can still consume huge memory, by splitting it into several insert into can reduce he memory useage
 )
 AS
 BEGIN
@@ -513,17 +514,20 @@ END
 SET @PK_column_list = LEFT(@PK_column_list, LEN(@PK_column_list) -1)
 SET @PK_column_joins = LEFT(@PK_column_joins, LEN(@PK_column_joins) -4)
 
+ DECLARE @output VARCHAR(MAX) = ''
+ DECLARE @datasource VARCHAR(MAX) = ''
+ DECLARE @b CHAR(2) = CHAR(13) + CHAR(10)
+ DECLARE @insertTempSQL varchar(8000) = @b + @batch_separator + @b + 'INSERT INTO #temp' + @table_name + ' (' + @Column_List + ') ' + @b
+
 --Forming the final string that will be executed, to output the a MERGE statement
 SET @Actual_Values = 
  'SELECT ' + 
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
  '''' + 
- ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list) + ') = 1 THEN '' '' ELSE ' + CASE WHEN @source_as_temp_table = 0 THEN ''',''' ELSE ''' UNION ALL ''' END + ' END' + CASE WHEN @source_as_temp_table = 0 THEN '+ ''(''+ ' ELSE ' + '' SELECT '' + ' END + @Actual_Values + CASE WHEN @source_as_temp_table = 0 THEN '+'')''' ELSE '' END + ' ' + 
+ ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list) + ') = 1 THEN '' '' WHEN ROW_NUMBER() OVER (ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list) + ') % 2000 = 0 AND 2 = ' + CONVERT(VARCHAR, CONVERT(INT,@split_query_for_source_temp_insert) + CONVERT(INT,@source_as_temp_table)) +' THEN ''' + CASE WHEN @source_as_temp_table = 1 AND @split_query_for_source_temp_insert = 1  THEN @insertTempSQL ELSE '''''' END + ''' ELSE ' + CASE WHEN @source_as_temp_table = 0 THEN ''',''' ELSE ''' UNION ALL ''' END + ' END' + CASE WHEN @source_as_temp_table = 0 THEN '+ ''(''+ ' ELSE ' + '' SELECT '' + ' END + @Actual_Values + CASE WHEN @source_as_temp_table = 0 THEN '+'')''' ELSE '' END + ' ' + 
  COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ') + CASE WHEN @from IS NOT NULL AND CHARINDEX(@from, 'ORDER BY') > 0 THEN '' ELSE  ' ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list) END
 
- DECLARE @output VARCHAR(MAX) = ''
- DECLARE @datasource VARCHAR(MAX) = ''
- DECLARE @b CHAR(1) = CHAR(13)
+
 
 --Determining whether to ouput any debug information
 IF @debug_mode =1
@@ -599,8 +603,8 @@ BEGIN
 	 END
 	IF (SELECT COUNT(*) FROM @tab) <> 0
 	BEGIN
-		SET @output += @b + 'INSERT INTO #temp' + @table_name + ' (' + @Column_List + ') '
 
+		SET @output += @insertTempSQL
 		SET @output += @b + @datasource
 	END
 
