@@ -525,7 +525,7 @@ SET @Actual_Values =
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
  '''' + 
  ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list) + ') = 1 THEN '' '' WHEN ROW_NUMBER() OVER (ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list) + ') % 2000 = 0 AND 2 = ' + CONVERT(VARCHAR, CONVERT(INT,@split_query_for_source_temp_insert) + CONVERT(INT,@source_as_temp_table)) +' THEN ''' + CASE WHEN @source_as_temp_table = 1 AND @split_query_for_source_temp_insert = 1  THEN @insertTempSQL ELSE '''''' END + ''' ELSE ' + CASE WHEN @source_as_temp_table = 0 THEN ''',''' ELSE ''' UNION ALL ''' END + ' END' + CASE WHEN @source_as_temp_table = 0 THEN '+ ''(''+ ' ELSE ' + '' SELECT '' + ' END + @Actual_Values + CASE WHEN @source_as_temp_table = 0 THEN '+'')''' ELSE '' END + ' ' + 
- COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ') + CASE WHEN @from IS NOT NULL AND CHARINDEX(@from, 'ORDER BY') > 0 THEN '' ELSE  ' ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list) END
+ COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ') + CASE WHEN @from IS NOT NULL AND CHARINDEX(SUBSTRING(@from, LEN(@from) - 500, 500), 'ORDER BY') > 0 THEN '' ELSE  ' ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list) END
 
 
 
