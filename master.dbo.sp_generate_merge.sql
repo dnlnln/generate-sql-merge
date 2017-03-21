@@ -15,7 +15,7 @@ GO
 
 --Turn system object marking on
 
-CREATE PROC sp_generate_merge
+CREATE PROC [sp_generate_merge]
 (
  @table_name varchar(776), -- The table/view for which the MERGE statement will be generated using the existing data
  @target_table varchar(776) = NULL, -- Use this parameter to specify a different table name into which the data will be inserted/updated/deleted
@@ -345,19 +345,19 @@ WHILE @Column_ID IS NOT NULL
  CASE 
  WHEN @Data_Type IN ('char','nchar') 
  THEN 
- 'COALESCE('''''''' + REPLACE(RTRIM(' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')'
+ 'COALESCE(''N'''''' + REPLACE(RTRIM(' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')'
  WHEN @Data_Type IN ('varchar','nvarchar') 
  THEN 
- 'COALESCE('''''''' + REPLACE(' + @Column_Name + ','''''''','''''''''''')+'''''''',''NULL'')'
+ 'COALESCE(''N'''''' + REPLACE(' + @Column_Name + ','''''''','''''''''''')+'''''''',''NULL'')'
  WHEN @Data_Type IN ('datetime','smalldatetime','datetime2','date') 
  THEN 
  'COALESCE('''''''' + RTRIM(CONVERT(char,' + @Column_Name + ',127))+'''''''',''NULL'')'
  WHEN @Data_Type IN ('uniqueidentifier') 
  THEN 
- 'COALESCE('''''''' + REPLACE(CONVERT(char(36),RTRIM(' + @Column_Name + ')),'''''''','''''''''''')+'''''''',''NULL'')'
+ 'COALESCE(''N'''''' + REPLACE(CONVERT(char(36),RTRIM(' + @Column_Name + ')),'''''''','''''''''''')+'''''''',''NULL'')'
  WHEN @Data_Type IN ('text') 
  THEN 
- 'COALESCE('''''''' + REPLACE(CONVERT(varchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')' 
+ 'COALESCE(''N'''''' + REPLACE(CONVERT(varchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')' 
  WHEN @Data_Type IN ('ntext') 
  THEN 
  'COALESCE('''''''' + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')' 
@@ -666,4 +666,4 @@ GRANT EXEC ON sp_generate_merge TO public
 SET NOCOUNT OFF
 GO
 
-PRINT 'Done'
+END
