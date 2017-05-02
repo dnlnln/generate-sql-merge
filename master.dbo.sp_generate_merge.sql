@@ -666,4 +666,4 @@ GRANT EXEC ON sp_generate_merge TO public
 SET NOCOUNT OFF
 GO
 
-END
+PRINT 'Done'
