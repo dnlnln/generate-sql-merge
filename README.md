@@ -3,7 +3,7 @@ Generate SQL MERGE statements with Table data
 
 This system stored procedure takes a table name as a parameter and generates a `MERGE` statement containing all the table data. 
 
-This is useful if you need to [migrate static data between databases](http://support.ready-roll.com/customer/portal/articles/437299-including-static-data-in-db-deployments), eg. the generated MERGE statement can be included in source control and used to deploy data between DEV/TEST/PROD.
+This is useful if you need to [migrate static data between databases](https://documentation.red-gate.com/display/RR1/Static+Data#StaticData-offline), eg. the generated MERGE statement can be included in source control and used to deploy data between DEV/TEST/PROD.
 
 The stored procedure itself is installed within the `[master]` database as a system object, allowing the proc to be called within the context of user databases (e.g. `EXEC Northwind.dbo.sp_generate_merge 'Region'`)
 
@@ -68,7 +68,7 @@ To generate a MERGE statement containing all data within the Person.AddressType 
 EXEC AdventureWorks.dbo.sp_generate_merge @schema = 'Person', @table_name ='AddressType', @cols_to_exclude = '''ModifiedDate'',''rowguid'''
 ```
 
-###Output
+### Output
 
 ```
 SET NOCOUNT ON
