@@ -1,9 +1,9 @@
 SET NOCOUNT ON
 GO
 
-PRINT 'Using Master database'
-USE master
-GO
+--PRINT 'Using Master database'
+--USE master
+--GO
 
 PRINT 'Checking for the existence of this procedure'
 IF (SELECT OBJECT_ID('sp_generate_merge','P')) IS NOT NULL --means, the procedure already exists
@@ -19,7 +19,7 @@ CREATE PROC [sp_generate_merge]
 (
  @table_name varchar(776), -- The table/view for which the MERGE statement will be generated using the existing data
  @target_table varchar(776) = NULL, -- Use this parameter to specify a different table name into which the data will be inserted/updated/deleted
- @from varchar(800) = NULL, -- Use this parameter to filter the rows based on a filter condition (using WHERE)
+ @from varchar(max) = NULL, -- Use this parameter to filter the rows based on a filter condition (using WHERE)
  @include_timestamp bit = 0, -- Specify 1 for this parameter, if you want to include the TIMESTAMP/ROWVERSION column's data in the MERGE statement
  @debug_mode bit = 0, -- If @debug_mode is set to 1, the SQL statements constructed by this procedure will be printed for later examination
  @schema varchar(64) = NULL, -- Use this parameter if you are not the owner of the table
@@ -36,7 +36,18 @@ CREATE PROC [sp_generate_merge]
  @results_to_text bit = 0, -- When 1, outputs results to grid/messages window. When 0, outputs MERGE statement in an XML fragment.
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
- @batch_separator VARCHAR(50) = 'GO' -- Batch separator to use
+ @batch_separator VARCHAR(50) = 'GO', -- Batch separator to use
+ @source_as_temp_table bit = 0, -- When 1, insert source into a temp table first and use it for merge query source, which will avoid 'query processor ran out of internal resources' when too many records in the merge body
+ @new_identity_in_temp_table bit = 0, -- Only take effect when @source_as_temp_table is 1, when this is 1, the new temp table as the source will generate a new identity column, old one will be only used for reference, so that extra work can be done to remapping without identity_insert
+ @different_join_columns varchar(8000) = NULL, -- only if you need the merge to matching record not by PK but something else
+ @different_join_nullable_columns varchar(8000) = NULL,
+ @script_before_merge varchar(8000) = NULL,
+ @script_after_merge varchar(8000) = NULL,
+ @drop_temp_table bit = 1,
+ @output_identity_into_temp bit = 0,
+ @ignore_duplicates_for_update bit = 0,
+ @columns_order_by varchar(8000) = NULL,
+ @split_query_for_source_temp_insert bit = 0 -- even with temp table as source, the union select that insert into the temp table can still consume huge memory, by splitting it into several insert into can reduce he memory useage
 )
 AS
 BEGIN
@@ -238,7 +249,7 @@ ELSE
 DECLARE @Column_ID int, 
  @Column_List varchar(8000), 
  @Column_List_For_Update varchar(8000), 
- @Column_List_For_Check varchar(8000), 
+ @Column_List_For_Check varchar(max), 
  @Column_Name varchar(128), 
  @Column_Name_Unquoted varchar(128), 
  @Data_Type varchar(128), 
@@ -308,7 +319,7 @@ WHILE @Column_ID IS NOT NULL
  --Making sure to output SET IDENTITY_INSERT ON/OFF in case the table has an IDENTITY column
  IF (SELECT COLUMNPROPERTY( OBJECT_ID(@Source_Table_Qualified),SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsIdentity')) = 1 
  BEGIN
- IF @ommit_identity = 0 --Determing whether to include or exclude the IDENTITY column
+  IF @ommit_identity = 0 OR @new_identity_in_temp_table = 1 --Determing whether to include or exclude the IDENTITY column
  SET @IDN = @Column_Name
  ELSE
  GOTO SKIP_LOOP 
@@ -401,6 +412,8 @@ WHILE @Column_ID IS NOT NULL
  AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
  AND c.CONSTRAINT_NAME = pk.CONSTRAINT_NAME
  AND c.COLUMN_NAME = @Column_Name_Unquoted 
+ UNION
+ SELECT 1 WHERE @IDN = @Column_Name
  )
  BEGIN
  SET @Column_List_For_Update = @Column_List_For_Update + @Column_Name + ' = Source.' + @Column_Name + ', 
@@ -468,20 +481,53 @@ IF IsNull(@PK_column_list, '') = ''
  RETURN -1 --Failure. Reason: looks like table doesn't have any primary keys
  END
 
+IF IsNull(@different_join_columns , '') <> ''
+BEGIN
+	SET @PK_column_list = ''
+	SET @PK_column_joins = ''
+
+	DECLARE @pos INT
+	DECLARE @len INT
+	DECLARE @value varchar(8000)
+
+	set @pos = 0
+	set @len = 0
+
+	WHILE CHARINDEX(',', @different_join_columns, @pos+1)>0
+	BEGIN
+		set @len = CHARINDEX(',', @different_join_columns, @pos+1) - @pos
+		set @value = SUBSTRING(@different_join_columns, @pos, @len)
+
+		SET @PK_column_list = @PK_column_list + '[' + @value + '], '
+		IF @different_join_nullable_columns IS NOT NULL AND CHARINDEX(@value, @different_join_nullable_columns) > 0
+		BEGIN
+			SET @PK_column_joins = @PK_column_joins + '(Target.[' + @value + '] = Source.[' + @value + '] OR Target.[' + @value + '] IS NULL AND Source.[' + @value + '] IS NULL) AND '
+		END
+		ELSE BEGIN
+			SET @PK_column_joins = @PK_column_joins + 'Target.[' + @value + '] = Source.[' + @value + '] AND '
+		END
+	    
+		set @pos = CHARINDEX(',', @different_join_columns, @pos+@len) +1
+	END	
+END
+
 SET @PK_column_list = LEFT(@PK_column_list, LEN(@PK_column_list) -1)
 SET @PK_column_joins = LEFT(@PK_column_joins, LEN(@PK_column_joins) -4)
 
+ DECLARE @output VARCHAR(MAX) = ''
+ DECLARE @datasource VARCHAR(MAX) = ''
+ DECLARE @b CHAR(2) = CHAR(13) + CHAR(10)
+ DECLARE @insertTempSQL varchar(8000) = @b + @batch_separator + @b + 'INSERT INTO #temp' + @table_name + ' (' + @Column_List + ') ' + @b
 
 --Forming the final string that will be executed, to output the a MERGE statement
 SET @Actual_Values = 
  'SELECT ' + 
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
  '''' + 
- ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + @PK_column_list + ') = 1 THEN '' '' ELSE '','' END + ''(''+ ' + @Actual_Values + '+'')''' + ' ' + 
- COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ORDER BY ' + @PK_column_list)
+ ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list) + ') = 1 THEN '' '' WHEN ROW_NUMBER() OVER (ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list) + ') % 2000 = 0 AND 2 = ' + CONVERT(VARCHAR, CONVERT(INT,@split_query_for_source_temp_insert) + CONVERT(INT,@source_as_temp_table)) +' THEN ''' + CASE WHEN @source_as_temp_table = 1 AND @split_query_for_source_temp_insert = 1  THEN @insertTempSQL ELSE '''''' END + ''' ELSE ' + CASE WHEN @source_as_temp_table = 0 THEN ''',''' ELSE ''' UNION ALL ''' END + ' END' + CASE WHEN @source_as_temp_table = 0 THEN '+ ''(''+ ' ELSE ' + '' SELECT '' + ' END + @Actual_Values + CASE WHEN @source_as_temp_table = 0 THEN '+'')''' ELSE '' END + ' ' + 
+ COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ') + CASE WHEN @from IS NOT NULL AND CHARINDEX(SUBSTRING(@from, LEN(@from) - 500, 500), 'ORDER BY') > 0 THEN '' ELSE  ' ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list) END
 
- DECLARE @output VARCHAR(MAX) = ''
- DECLARE @b CHAR(1) = CHAR(13)
+
 
 --Determining whether to ouput any debug information
 IF @debug_mode =1
@@ -523,26 +569,11 @@ IF (@include_rowsaffected = 1) -- If the caller has elected not to include the "
  SET @output += @b + 'SET NOCOUNT ON'
  SET @output += @b + ''
 
-
---Determining whether to print IDENTITY_INSERT or not
-IF (LEN(@IDN) <> 0)
- BEGIN
- SET @output += @b + 'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' ON'
- SET @output += @b + ''
- END
-
-
 --Temporarily disable constraints on the target table
 IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT NULL)
  BEGIN
  SET @output += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' NOCHECK CONSTRAINT ALL' --Code to disable constraints temporarily
  END
-
-
---Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
-SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS Target'
-SET @output += @b + 'USING (VALUES'
-
 
 --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
 DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max));
@@ -551,11 +582,83 @@ EXEC (@Actual_Values)
 
 IF (SELECT COUNT(*) FROM @tab) <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
 BEGIN
- SET @output += CAST((SELECT @b + val FROM @tab ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
+ SET @datasource += CAST((SELECT @b + val FROM @tab ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
+END
+
+IF @source_as_temp_table = 1
+BEGIN
+	IF @new_identity_in_temp_table = 0
+	BEGIN
+		SET @output += @b + 'SELECT '+ @Column_List +' INTO #temp' + @table_name + ' FROM ' + @Source_Table_Qualified + ' WHERE 1 <> 1'
+	END
+	ELSE BEGIN
+		SET @output += @b + 'SELECT IDENTITY (int, 1,1) AS CopyMappingID,' + REPLACE ( @Column_List , '[' , 'T1.[' ) +' INTO #temp' + @table_name + ' FROM ' + @Source_Table_Qualified + @b + ' AS T1 LEFT JOIN ' + @Source_Table_Qualified + ' AS T2 ON 1=0 WHERE 1 <> 1'
+	END
+	
+	IF (LEN(@IDN) <> 0 AND @new_identity_in_temp_table = 0)
+	 BEGIN
+		 SET @output += @b + ''
+		 SET @output += @b + 'SET IDENTITY_INSERT #temp' + @table_name + ' ON'
+		 SET @output += @b + ''
+	 END
+	IF (SELECT COUNT(*) FROM @tab) <> 0
+	BEGIN
+
+		SET @output += @insertTempSQL
+		SET @output += @b + @datasource
+	END
+
+	IF (LEN(@IDN) <> 0 AND @new_identity_in_temp_table = 0)
+	 BEGIN
+		 SET @output += @b + ''
+		 SET @output += @b + 'SET IDENTITY_INSERT #temp' + @table_name + ' OFF'
+		 SET @output += @b + ''
+	 END
+END
+
+IF @new_identity_in_temp_table = 1 AND @ommit_identity = 1
+BEGIN
+	SET @Column_List = REPLACE ( @Column_List , '' + @IDN + ',' , '' )
+END
+
+IF LEN(@IDN) <> 0 AND @source_as_temp_table = 1 AND @output_identity_into_temp=1 BEGIN
+  SET @output += @b + 'CREATE TABLE #temp' + @table_name + '_Identity_Mapping(' + @IDN + ' INT, ' + REPLACE(@IDN, ']', '_Source]') + ' INT, Action Varchar(10));'
+  SET @output += @b + 'ALTER TABLE #temp' + @table_name + ' ADD '+ REPLACE(@IDN, ']', '_Source]') + ' INT;'
+END;
+
+--Determining whether to print IDENTITY_INSERT or not
+IF (LEN(@IDN) <> 0 AND @ommit_identity = 0 AND CHARINDEX('#', @Target_Table_For_Output) = 0 AND @output_identity_into_temp = 0)
+ BEGIN
+ SET @output += @b + 'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' ON'
+ SET @output += @b + ''
+END
+
+IF (@script_before_merge IS NOT NULL)
+BEGIN
+	SET @output += @b
+	SET @output += @script_before_merge
+	SET @output += @b + @batch_separator
+END
+
+--Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
+SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS Target'
+
+IF @source_as_temp_table = 1
+BEGIN
+	IF @ignore_duplicates_for_update = 0
+	BEGIN
+		SET @output += @b + 'USING (SELECT TOP 9223372036854775807 ' + @Column_List + ' FROM #temp' + @table_name + ' ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list)
+	END
+	ELSE BEGIN
+		SET @output += @b + 'USING (SELECT TOP 9223372036854775807 ROW_NUMBER() OVER(PARTITION BY ' + REPLACE(@Column_List, @IDN +',', '') + ' ORDER BY ' + @IDN + ' DESC) AS RowNum,' + @Column_List + ' FROM #temp' + @table_name + ' ORDER BY ' + ISNULL(@columns_order_by, @PK_column_list)
+	END
+END
+ELSE BEGIN
+	SET @output += @b + 'USING (VALUES' + @datasource
 END
 
 --Output the columns to correspond with each of the values above--------------------
-SET @output += @b + ') AS Source (' + @Column_List + ')'
+SET @output += @b + ') AS Source (' + CASE WHEN @source_as_temp_table = 1 AND @ignore_duplicates_for_update = 1 THEN 'RowNum,' ELSE '' END + @Column_List + ')'
 
 
 --Output the join columns ----------------------------------------------------------
@@ -565,7 +668,7 @@ SET @output += @b + 'ON (' + @PK_column_joins + ')'
 --When matched, perform an UPDATE on any metadata columns only (ie. not on PK)------
 IF LEN(@Column_List_For_Update) <> 0
 BEGIN
- SET @output += @b + 'WHEN MATCHED ' + CASE WHEN @update_only_if_changed = 1 THEN 'AND (' + @Column_List_For_Check + ') ' ELSE '' END + 'THEN'
+ SET @output += @b + 'WHEN MATCHED ' + CASE WHEN @update_only_if_changed = 1 THEN 'AND (' + @Column_List_For_Check + ') ' ELSE '' END  + CASE WHEN @ignore_duplicates_for_update = 1 AND @source_as_temp_table = 1 THEN 'AND RowNum = 1 ' ELSE '' END + 'THEN'
  SET @output += @b + ' UPDATE SET'
  SET @output += @b + '  ' + LTRIM(@Column_List_For_Update)
 END
@@ -573,8 +676,8 @@ END
 
 --When NOT matched by target, perform an INSERT------------------------------------
 SET @output += @b + 'WHEN NOT MATCHED BY TARGET THEN';
-SET @output += @b + ' INSERT(' + @Column_List + ')'
-SET @output += @b + ' VALUES(' + REPLACE(@Column_List, '[', 'Source.[') + ')'
+SET @output += @b + ' INSERT(' + CASE WHEN @output_identity_into_temp = 1 AND LEN(@IDN) > 0 THEN REPLACE(@Column_List, @IDN +',', '') ELSE @Column_List END + ')'
+SET @output += @b + ' VALUES(' + REPLACE(CASE WHEN @output_identity_into_temp = 1 AND LEN(@IDN) > 0 THEN REPLACE(@Column_List, @IDN +',', '') ELSE @Column_List END, '[', 'Source.[') + ')'
 
 
 --When NOT matched by source, DELETE the row
@@ -582,8 +685,21 @@ IF @delete_if_not_matched=1 BEGIN
  SET @output += @b + 'WHEN NOT MATCHED BY SOURCE THEN '
  SET @output += @b + ' DELETE'
 END;
+
+IF LEN(@IDN) <> 0 AND @source_as_temp_table = 1 AND @output_identity_into_temp=1 BEGIN
+ SET @output += @b + 'OUTPUT inserted.' + @IDN + ',Source.' + @IDN + ' AS ' + REPLACE(@IDN, ']', '_Source], $action AS Action') + ' INTO #temp' + @table_name + '_Identity_Mapping;'
+END;
+
 SET @output += @b + ';'
 SET @output += @b + @batch_separator
+
+
+IF (@script_after_merge IS NOT NULL)
+BEGIN
+	SET @output += @b
+	SET @output += @script_after_merge
+	SET @output += @b + @batch_separator
+END
 
 --Display the number of affected rows to the user, or report if an error occurred---
 IF @include_rowsaffected = 1
@@ -603,6 +719,15 @@ BEGIN
  SET @output += @b + @b
 END
 
+IF LEN(@IDN) <> 0 AND @source_as_temp_table = 1 AND @output_identity_into_temp=1 BEGIN
+SET @output += @b + 'DECLARE @lInsertedCount INT, @lUpdatedCount INT, @lDeletedCount INT'
+	SET @output += @b + 'SELECT @lInsertedCount = SUM(CASE WHEN A.Action = ''INSERT'' THEN 1 ELSE 0 END), @lUpdatedCount = SUM(CASE WHEN A.Action = ''UPDATE'' THEN 1 ELSE 0 END), @lDeletedCount = SUM(CASE WHEN A.Action = ''DELETE'' THEN 1 ELSE 0 END)  FROM #temp' + @table_name + '_Identity_Mapping AS A;'
+	SET @output += @b + ' PRINT ''' + @Target_Table_For_Output + ' inserted by MERGE: '' + CAST(@lInsertedCount AS VARCHAR(100)) + '',  updated by MERGE:'' + CAST(@lUpdatedCount AS VARCHAR(100)) + '',  deleted by MERGE:'' + CAST(@lDeletedCount AS VARCHAR(100));';
+	SET @output += @b + @batch_separator
+	SET @output += @b + @b
+ SET @output += @b + 'UPDATE T SET T.' + REPLACE(@IDN, ']', '_Source]') + ' = T1.' + REPLACE(@IDN, ']', '_Source], T.') + @IDN + ' = T1.' + @IDN + ' FROM #temp' + @table_name + ' AS T JOIN #temp' + @table_name + '_Identity_Mapping AS T1 ON T.' + @IDN + ' = T1.' + REPLACE(@IDN, ']', '_Source];')
+ SET @output += @b + 'DROP TABLE #temp' + @table_name + '_Identity_Mapping;'
+END;
 --Re-enable the previously disabled constraints-------------------------------------
 IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT NULL)
  BEGIN
@@ -613,7 +738,7 @@ IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT 
 
 
 --Switch-off identity inserting------------------------------------------------------
-IF (LEN(@IDN) <> 0)
+IF (LEN(@IDN) <> 0) AND @ommit_identity = 0 AND CHARINDEX('#', @Target_Table_For_Output) = 0 AND @new_identity_in_temp_table = 0
  BEGIN
  SET @output +=      'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' OFF'
  SET @output += @b + @batch_separator
@@ -629,6 +754,13 @@ END
 
 SET @output += @b + ''
 SET @output += @b + ''
+
+IF @source_as_temp_table = 1 AND @drop_temp_table = 1
+BEGIN
+	SET @output += @b + 'DROP TABLE #temp' + @table_name
+	SET @output += @b + @batch_separator
+	SET @output += @b
+END
 
 IF @results_to_text = 1
 BEGIN

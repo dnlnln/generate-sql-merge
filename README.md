@@ -6,7 +6,7 @@ This system stored procedure takes a table name as a parameter and generates a `
 This is useful if you need to [migrate static data between databases](https://documentation.red-gate.com/display/RR1/Static+Data#StaticData-offline), eg. the generated MERGE statement can be included in source control and used to deploy data between DEV/TEST/PROD.
 
 The stored procedure itself is installed within the `[master]` database as a system object, allowing the proc to be called within the context of user databases (e.g. `EXEC Northwind.dbo.sp_generate_merge 'Region'`)
-
+(The above is now commented out so that it creates in user database, so example changes to  (e.g. `EXEC dbo.sp_generate_merge 'Region'`))
 Key features:
 
 - Include or exclude specific columns from output (eg. exclude DateCreated/DateModified columns)
@@ -20,7 +20,7 @@ The generated MERGE statement populates the target table to match the source dat
 When the generated MERGE statement is executed, the following logic is applied based on whether a match is found:
 
 - If the source row does not exist in the target table, an `INSERT` is performed
-- If a given row in the target table does not exist in the source, a `DELETE` is performed
+- If a given row in the target table does not exist in the source, a `DELETE` is performed (causing huge slowness)
 - If the source row already exists in the target table and has changed, an `UPDATE` is performed
 - If the source row already exists in the target table but the data has not changed, no action is performed (configurable)
 
@@ -46,7 +46,7 @@ I would also like to acknowledge:
  
 ## Installation
 Simply execute the script, which will install it in `[master]` database as a system procedure (making it executable within user databases).
-
+The use master is currently removed from it in case login limitation won't allow creation in master, create in user database works too.
 
 ## Known Limitations
 This procedure has explicit support for the following datatypes: (small)datetime(2), (n)varchar, (n)text, (n)char, int, float, real, (small)money, timestamp, rowversion, uniqueidentifier and (var)binary. All others are implicitly converted to their CHAR representations so YMMV depending on the datatype. Additionally, this procedure has not been extensively tested with UNICODE datatypes.
@@ -100,4 +100,39 @@ GO
 SET NOCOUNT OFF
 GO
 ```
+## Changes in this fork
+1. Commented out using master so it creates on user db instead
+2. The query will became really slow with more data invovled and sql server would not even able to run it as all data is forming into a memory table. Therefore a new parameter was introduced @source_as_temp_table which will put those raw data into a tempporary table first and then use that as a source to improve performance
+3. Along with @source_as_temp_table @output_identity_into_temp will use OUTPUT keyword to write all matching identity pk back into the temporary table with extra '_Source' appended to the identity column name as a new column, so that when exporting linked record between table when identiy insert is not an option
+4. In order to make #3 mapping actually work @script_before_merge @script_after_merge was introduced to ingect sql code for mapping, which also kind of need @drop_temp_table
+5. Added @ignore_duplicates_for_update so that when source data for no reason has duplicates except identity rerun the script won't causing trouble with rownumber
+6. Added @different_join_columns so that the match can be used on different columns
+7. @different_join_nullable_columns is a subset of @different_join_columns to tell those columns might be nullable so that we match them with both null check on source and target
 
+## Example
+
+I want to export one certain set of data from A(Id, Code, Column1, Column2) and B(Id, AId, Data1, Data2), which is a 1-N mapping, when applying on a different DB I would like remain the relationship between them but not using identity insert, based on that in A table there are other columns is unique enough to match the target
+
+```
+DECLARE @from_query VARCHAR(max) = 'from A where Id IN (' + @sIdString + ')'
+EXEC sp_generate_merge 'A', @include_use_db = 0,  @source_as_temp_table = 1, @ommit_identity = 0, @results_to_text =1,
+		@from = @from_query, @delete_if_not_matched = 0, @update_only_if_changed = 0,
+		@new_identity_in_temp_table = 1, @different_join_columns = 'Code,',
+ 		@script_before_merge = '',
+		@script_after_merge = '',
+		@drop_temp_table = 0, @output_identity_into_temp = 1
+
+
+SET @from_query = 'from B where Id IN (' + @sBIdString + ')'
+EXEC sp_generate_merge 'B', @include_use_db = 0,  @source_as_temp_table = 1, @ommit_identity = 0, @results_to_text =1,
+		@from = @from_query, @delete_if_not_matched = 0,  @update_only_if_changed = 0,
+		@new_identity_in_temp_table = 1, @different_join_columns = 'AId,Data1,Data2,',
+		@different_join_nullable_columns = 'Data2,',
+ 		@script_before_merge = 'UPDATE T
+								SET T.[AId] = T1.[Id]
+								FROM  #tempB AS T 
+									JOIN #tempA AS T1
+										ON T1.[Id_Source] = T.[AId];',
+		@script_after_merge = '',
+		@drop_temp_table = 0, @output_identity_into_temp = 1, @ignore_duplicates_for_update = 1
+```
