@@ -20,7 +20,7 @@ CREATE PROC [sp_generate_merge]
  @table_name varchar(776), -- The table/view for which the MERGE statement will be generated using the existing data
  @target_table varchar(776) = NULL, -- Use this parameter to specify a different table name into which the data will be inserted/updated/deleted
  @from nvarchar(max) = NULL, -- Use this parameter to filter the rows based on a filter condition (using WHERE)
- @include_timestamp bit = 0, -- Specify 1 for this parameter, if you want to include the TIMESTAMP/ROWVERSION column's data in the MERGE statement
+ @include_timestamp bit = 0, -- [DEPRECATED] Sql Server does not allow modification of TIMESTAMP datatype
  @debug_mode bit = 0, -- If @debug_mode is set to 1, the SQL statements constructed by this procedure will be printed for later examination
  @schema varchar(64) = NULL, -- Use this parameter if you are not the owner of the table
  @ommit_images bit = 0, -- Use this parameter to generate MERGE statement by omitting the 'image' columns
@@ -126,46 +126,41 @@ Example 4: To generate a MERGE statement for 'titles' table for only those title
 
  EXEC sp_generate_merge 'titles', @from = "from titles where title like '%Computer%'"
 
-Example 5: To specify that you want to include TIMESTAMP column's data as well in the MERGE statement:
- (By default TIMESTAMP column's data is not scripted)
-
- EXEC sp_generate_merge 'titles', @include_timestamp = 1
-
-Example 6: To print the debug information:
+Example 5: To print the debug information:
 
  EXEC sp_generate_merge 'titles', @debug_mode = 1
 
-Example 7: If the table is in a different schema to the default, use @schema parameter to specify the schema name
+Example 6: If the table is in a different schema to the default, use @schema parameter to specify the schema name
  To use this option, you must have SELECT permissions on that table
 
  EXEC sp_generate_merge 'Nickstable', @schema = 'Nick'
 
-Example 8: To generate a MERGE statement for the rest of the columns excluding images
+Example 7: To generate a MERGE statement for the rest of the columns excluding images
 
  EXEC sp_generate_merge 'imgtable', @ommit_images = 1
 
-Example 9: To generate a MERGE statement excluding (omitting) IDENTITY columns:
+Example 8: To generate a MERGE statement excluding (omitting) IDENTITY columns:
  (By default IDENTITY columns are included in the MERGE statement)
 
  EXEC sp_generate_merge 'mytable', @ommit_identity = 1
 
-Example 10: To generate a MERGE statement for the TOP 10 rows in the table:
+Example 9: To generate a MERGE statement for the TOP 10 rows in the table:
  
  EXEC sp_generate_merge 'mytable', @top = 10
 
-Example 11: To generate a MERGE statement with only those columns you want:
+Example 10: To generate a MERGE statement with only those columns you want:
  
  EXEC sp_generate_merge 'titles', @cols_to_include = "'title','title_id','au_id'"
 
-Example 12: To generate a MERGE statement by omitting certain columns:
+Example 11: To generate a MERGE statement by omitting certain columns:
  
  EXEC sp_generate_merge 'titles', @cols_to_exclude = "'title','title_id','au_id'"
 
-Example 13: To avoid checking the foreign key constraints while loading data with a MERGE statement:
+Example 12: To avoid checking the foreign key constraints while loading data with a MERGE statement:
  
  EXEC sp_generate_merge 'titles', @disable_constraints = 1
 
-Example 14: To exclude computed columns from the MERGE statement:
+Example 13: To exclude computed columns from the MERGE statement:
 
  EXEC sp_generate_merge 'MyTable', @ommit_computed_cols = 1
  
@@ -289,6 +284,12 @@ WHILE @Column_ID IS NOT NULL
  AND TABLE_NAME = @table_name
  AND TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
 
+
+IF @Data_Type IN ('timestamp','rowversion') --SQL Server doesn't allow Timestamp/Rowversion column updates
+BEGIN
+	GOTO SKIP_LOOP
+END
+
  IF @cols_to_include IS NOT NULL --Selecting only user specified columns
  BEGIN
  IF CHARINDEX( '''' + SUBSTRING(@Column_Name,2,LEN(@Column_Name)-2) + '''',@cols_to_include) = 0 
@@ -367,15 +368,6 @@ WHILE @Column_ID IS NOT NULL
  WHEN @Data_Type IN ('binary','varbinary') 
  THEN 
  'COALESCE(RTRIM(CONVERT(varchar(max),' + @Column_Name + ', 1))),''NULL'')' 
- WHEN @Data_Type IN ('timestamp','rowversion') 
- THEN 
- CASE 
- WHEN @include_timestamp = 0 
- THEN 
- '''DEFAULT''' 
- ELSE 
- 'COALESCE(RTRIM(CONVERT(char,' + 'CONVERT(int,' + @Column_Name + '))),''NULL'')' 
- END
  WHEN @Data_Type IN ('float','real','money','smallmoney')
  THEN
  'COALESCE(LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ',2)' + ')),''NULL'')' 
