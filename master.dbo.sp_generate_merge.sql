@@ -366,7 +366,7 @@ WHILE @Column_ID IS NOT NULL
  'COALESCE('''''''' + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')' 
  WHEN @Data_Type IN ('binary','varbinary') 
  THEN 
- 'COALESCE(RTRIM(CONVERT(varchar(max),' + @Column_Name + ', 1))),''NULL'')' 
+ 'COALESCE(RTRIM(CONVERT(varchar(max),' + @Column_Name + ', 1)),''NULL'')' 
  WHEN @Data_Type IN ('timestamp','rowversion') 
  THEN 
  CASE 
