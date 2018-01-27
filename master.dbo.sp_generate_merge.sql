@@ -427,7 +427,7 @@ WHILE @Column_ID IS NOT NULL
 --To get rid of the extra characters that got concatenated during the last run through the loop
 IF LEN(@Column_List_For_Update) <> 0
  BEGIN
- SET @Column_List_For_Update = ' ' + LEFT(@Column_List_For_Update,len(@Column_List_For_Update) - 4)
+ SET @Column_List_For_Update = ' ' + LEFT(@Column_List_For_Update,len(@Column_List_For_Update) - 3)
  END
 
 IF LEN(@Column_List_For_Check) <> 0
