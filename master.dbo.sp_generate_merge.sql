@@ -37,6 +37,8 @@ CREATE PROC [sp_generate_merge]
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
  @batch_separator VARCHAR(50) = 'GO' -- Batch separator to use
+ , @use_query_instead_of_values BIT = 0 --Uses a query for the source instead of a set of values. Useful for ongoing MERGE operations
+ , @join_column_list varchar(8000) = NULL --Allows user to pass in a known set of columns to match instead of relying on PKs
 )
 AS
 BEGIN
@@ -235,10 +237,14 @@ ELSE
 
 
 --Variable declarations
+
+--2018-02-27 - PAS
+--Changed @Column_List types to varchar(max) to allow for really large numbers of columns
+
 DECLARE @Column_ID int, 
- @Column_List varchar(8000), 
- @Column_List_For_Update varchar(8000), 
- @Column_List_For_Check varchar(8000), 
+ @Column_List varchar(max), 
+ @Column_List_For_Update varchar(max), 
+ @Column_List_For_Check varchar(max), 
  @Column_Name varchar(128), 
  @Column_Name_Unquoted varchar(128), 
  @Data_Type varchar(128), 
@@ -259,14 +265,21 @@ SET @Column_List_For_Update = ''
 SET @Column_List_For_Check = ''
 SET @Actual_Values = ''
 
+--2017-05 - PAS
+--Tweaked the @Target_Table to try to parse out the various pieces of the table names with a horrible set of REPLACE/QUOTENAME commands
+
 --Variable Defaults
 IF @schema IS NULL
  BEGIN
- SET @Target_Table_For_Output = QUOTENAME(COALESCE(@target_table, @table_name))
+ SET @Target_Table_For_Output = CASE WHEN @target_table NOT LIKE '%.%.%' THEN QUOTENAME(COALESCE(@target_table, @table_name))
+	ELSE REPLACE(REPLACE(QUOTENAME(REPLACE(@target_table, '.', '].[')), ']]', ']'), '[[', '[') END
  END
 ELSE
  BEGIN
- SET @Target_Table_For_Output = QUOTENAME(@schema) + '.' + QUOTENAME(COALESCE(@target_table, @table_name))
+ SET @Target_Table_For_Output = CASE WHEN @target_table NOT LIKE '%.%.%'
+		THEN QUOTENAME(@schema) + '.' + QUOTENAME(COALESCE(@target_table, @table_name))
+		ELSE REPLACE(REPLACE(QUOTENAME(REPLACE(@target_table, '.', '].[')), ']]', ']'), '[[', '[')
+		END
  END
 
 SET @Source_Table_Qualified = QUOTENAME(COALESCE(@schema,SCHEMA_NAME())) + '.' + QUOTENAME(@table_name)
@@ -451,6 +464,7 @@ DECLARE @PK_column_joins VARCHAR(8000)
 SET @PK_column_list = ''
 SET @PK_column_joins = ''
 
+IF COALESCE(@join_column_list, '') = '' --Populate if no Join Columns provided
 SELECT @PK_column_list = @PK_column_list + '[' + c.COLUMN_NAME + '], '
 , @PK_column_joins = @PK_column_joins + 'Target.[' + c.COLUMN_NAME + '] = Source.[' + c.COLUMN_NAME + '] AND '
 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk ,
@@ -461,6 +475,18 @@ AND CONSTRAINT_TYPE = 'PRIMARY KEY'
 AND c.TABLE_NAME = pk.TABLE_NAME
 AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
 AND c.CONSTRAINT_NAME = pk.CONSTRAINT_NAME
+
+
+-- Add section to provide "join" columns if no PKs
+-- PAS 2018-02-27
+IF COALESCE(@join_column_list, '') <> ''
+SELECT @PK_column_list = @PK_column_list + '[' + c.COLUMN_NAME + '], '
+, @PK_column_joins = @PK_column_joins + 'Target.[' + c.COLUMN_NAME + '] = Source.[' + c.COLUMN_NAME + '] AND '
+FROM INFORMATION_SCHEMA.Columns AS c
+WHERE c.COLUMN_NAME IN (@join_column_list)
+AND c.TABLE_NAME = @table_name
+AND c.TABLE_SCHEMA = @schema
+
 
 IF IsNull(@PK_column_list, '') = '' 
  BEGIN
@@ -541,9 +567,12 @@ IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT 
 
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
 SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS Target'
-SET @output += @b + 'USING (VALUES'
+SET @output += @b + CASE WHEN @use_query_instead_of_values = 0 THEN 'USING (VALUES' ELSE 'USING (' END
 
 
+--2017-05-27 - PAS - added option to use a query for the source instead of values
+IF @use_query_instead_of_values = 0
+BEGIN --populate values
 --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
 DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max));
 INSERT INTO @tab (val)
@@ -553,6 +582,15 @@ IF (SELECT COUNT(*) FROM @tab) <> 0 -- Ensure that rows were returned, otherwise
 BEGIN
  SET @output += CAST((SELECT @b + val FROM @tab ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
 END
+
+END --Populate Values
+
+
+IF @use_query_instead_of_values = 1
+BEGIN --use query instead of VALUES
+ SET @output += @b + 'SELECT ' + @Column_List + @b + COALESCE(@from,' FROM ' + @Source_Table_Qualified)
+
+END --Use query instead of VALUES
 
 --Output the columns to correspond with each of the values above--------------------
 SET @output += @b + ') AS Source (' + @Column_List + ')'
