@@ -403,13 +403,13 @@ WHILE @Column_ID IS NOT NULL
  AND c.COLUMN_NAME = @Column_Name_Unquoted 
  )
  BEGIN
- SET @Column_List_For_Update = @Column_List_For_Update + @Column_Name + ' = Source.' + @Column_Name + ', 
+ SET @Column_List_For_Update = @Column_List_For_Update + @Column_Name + ' = [Source].' + @Column_Name + ', 
   ' 
  SET @Column_List_For_Check = @Column_List_For_Check +
  CASE @Data_Type 
- WHEN 'text' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST(Source.' + @Column_Name + ' AS VARCHAR(MAX)), CAST(Target.' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST(Target.' + @Column_Name + ' AS VARCHAR(MAX)), CAST(Source.' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR '
- WHEN 'ntext' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST(Source.' + @Column_Name + ' AS NVARCHAR(MAX)), CAST(Target.' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST(Target.' + @Column_Name + ' AS NVARCHAR(MAX)), CAST(Source.' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
- ELSE CHAR(10) + CHAR(9) + 'NULLIF(Source.' + @Column_Name + ', Target.' + @Column_Name + ') IS NOT NULL OR NULLIF(Target.' + @Column_Name + ', Source.' + @Column_Name + ') IS NOT NULL OR '
+ WHEN 'text' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR '
+ WHEN 'ntext' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
+ ELSE CHAR(10) + CHAR(9) + 'NULLIF([Source].' + @Column_Name + ', [Target].' + @Column_Name + ') IS NOT NULL OR NULLIF([Target].' + @Column_Name + ', [Source].' + @Column_Name + ') IS NOT NULL OR '
  END 
  END
 
@@ -452,7 +452,7 @@ SET @PK_column_list = ''
 SET @PK_column_joins = ''
 
 SELECT @PK_column_list = @PK_column_list + '[' + c.COLUMN_NAME + '], '
-, @PK_column_joins = @PK_column_joins + 'Target.[' + c.COLUMN_NAME + '] = Source.[' + c.COLUMN_NAME + '] AND '
+, @PK_column_joins = @PK_column_joins + '[Target].[' + c.COLUMN_NAME + '] = [Source].[' + c.COLUMN_NAME + '] AND '
 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk ,
 INFORMATION_SCHEMA.KEY_COLUMN_USAGE c
 WHERE pk.TABLE_NAME = @table_name
@@ -506,7 +506,7 @@ IF @debug_mode =1
  
 IF (@include_use_db = 1)
 BEGIN
-	SET @output +=      'USE ' + DB_NAME()
+	SET @output += 'USE [' + DB_NAME() + ']'
 	SET @output += @b + @batch_separator
 	SET @output += @b + @b
 END
@@ -540,7 +540,7 @@ IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT 
 
 
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
-SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS Target'
+SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS [Target]'
 SET @output += @b + 'USING (VALUES'
 
 
@@ -555,7 +555,7 @@ BEGIN
 END
 
 --Output the columns to correspond with each of the values above--------------------
-SET @output += @b + ') AS Source (' + @Column_List + ')'
+SET @output += @b + ') AS [Source] (' + @Column_List + ')'
 
 
 --Output the join columns ----------------------------------------------------------
@@ -574,7 +574,7 @@ END
 --When NOT matched by target, perform an INSERT------------------------------------
 SET @output += @b + 'WHEN NOT MATCHED BY TARGET THEN';
 SET @output += @b + ' INSERT(' + @Column_List + ')'
-SET @output += @b + ' VALUES(' + REPLACE(@Column_List, '[', 'Source.[') + ')'
+SET @output += @b + ' VALUES(' + REPLACE(@Column_List, '[', '[Source].[') + ')'
 
 
 --When NOT matched by source, DELETE the row
