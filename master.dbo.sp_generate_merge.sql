@@ -20,6 +20,7 @@ CREATE PROC [sp_generate_merge]
  @table_name varchar(776), -- The table/view for which the MERGE statement will be generated using the existing data
  @target_table varchar(776) = NULL, -- Use this parameter to specify a different table name into which the data will be inserted/updated/deleted
  @from nvarchar(max) = NULL, -- Use this parameter to filter the rows based on a filter condition (using WHERE)
+ @include_values bit = 1, -- When 1, a VALUES clause containing data from @table_name is generated. When 0, data will be sourced directly from @table_name when the MERGE is executed.
  @include_timestamp bit = 0, -- [DEPRECATED] Sql Server does not allow modification of TIMESTAMP datatype
  @debug_mode bit = 0, -- If @debug_mode is set to 1, the SQL statements constructed by this procedure will be printed for later examination
  @schema varchar(64) = NULL, -- Use this parameter if you are not the owner of the table
@@ -533,22 +534,27 @@ IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT 
 
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
 SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS [Target]'
-SET @output += @b + 'USING (VALUES'
 
-
---All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
-DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max));
-INSERT INTO @tab (val)
-EXEC (@Actual_Values)
-
-IF (SELECT COUNT(*) FROM @tab) <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
+IF @include_values = 1
 BEGIN
- SET @output += CAST((SELECT @b + val FROM @tab ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
+ SET @output += @b + 'USING (VALUES'
+ --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
+ DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max));
+ INSERT INTO @tab (val)
+ EXEC (@Actual_Values)
+
+ IF (SELECT COUNT(*) FROM @tab) <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
+ BEGIN
+  SET @output += CAST((SELECT @b + val FROM @tab ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
+ END
+
+ --Output the columns to correspond with each of the values above--------------------
+ SET @output += @b + ') AS [Source] (' + @Column_List + ')'
 END
-
---Output the columns to correspond with each of the values above--------------------
-SET @output += @b + ') AS [Source] (' + @Column_List + ')'
-
+ELSE
+ BEGIN
+  SET @output += @b + 'USING ' + @Source_Table_Qualified + ' AS [Source]';
+ END
 
 --Output the join columns ----------------------------------------------------------
 SET @output += @b + 'ON (' + @PK_column_joins + ')'
