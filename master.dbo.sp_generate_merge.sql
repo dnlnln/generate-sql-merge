@@ -20,7 +20,7 @@ CREATE PROC [sp_generate_merge]
  @table_name varchar(776), -- The table/view for which the MERGE statement will be generated using the existing data
  @target_table varchar(776) = NULL, -- Use this parameter to specify a different table name into which the data will be inserted/updated/deleted
  @from nvarchar(max) = NULL, -- Use this parameter to filter the rows based on a filter condition (using WHERE)
- @table_not_values bit = 0, -- Specify 1 for this parameter to use all rows from source table instead of creating a values statement. Useful for merging large volumes of data 
+ @include_values bit = 1, -- When 1, a VALUES clause containing data from @table_name is generated. When 0, data will be sourced directly from @table_name when the MERGE is executed.
  @include_timestamp bit = 0, -- [DEPRECATED] Sql Server does not allow modification of TIMESTAMP datatype
  @debug_mode bit = 0, -- If @debug_mode is set to 1, the SQL statements constructed by this procedure will be printed for later examination
  @schema varchar(64) = NULL, -- Use this parameter if you are not the owner of the table
@@ -535,7 +535,7 @@ IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT 
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
 SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS [Target]'
 
-IF @table_not_values = 0
+IF @include_values = 1
 BEGIN
  SET @output += @b + 'USING (VALUES'
  --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
@@ -553,7 +553,7 @@ BEGIN
 END
 ELSE
  BEGIN
-  SET @output += @b + 'USING' + @Source_Table_Qualified + ' AS Source';
+  SET @output += @b + 'USING ' + @Source_Table_Qualified + ' AS [Source]';
  END
 
 --Output the join columns ----------------------------------------------------------
