@@ -539,7 +539,7 @@ SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS [Target]'
 
 IF @include_values = 1
 BEGIN
- SET @output += @b + 'USING (VALUES'
+ SET @output += @b + 'USING ('
  --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
  DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max));
  INSERT INTO @tab (val)
@@ -547,7 +547,12 @@ BEGIN
 
  IF (SELECT COUNT(*) FROM @tab) <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
  BEGIN
-  SET @output += CAST((SELECT @b + val FROM @tab ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
+  SET @output += 'VALUES' + CAST((SELECT @b + val FROM @tab ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
+ END
+ ELSE
+ BEGIN
+  -- Mimic an empty result set by returning zero rows from the target table
+  SET @output += 'SELECT ' + @Column_List + ' FROM ' + @Target_Table_For_Output + ' WHERE 1 = 0 -- Empty dataset (source table contained no rows at time of MERGE generation) '
  END
 
  --Output the columns to correspond with each of the values above--------------------
