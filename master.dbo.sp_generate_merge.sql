@@ -29,6 +29,7 @@ CREATE PROC [sp_generate_merge]
  @top int = NULL, -- Use this parameter to generate a MERGE statement only for the TOP n rows
  @cols_to_include varchar(8000) = NULL, -- List of columns to be included in the MERGE statement
  @cols_to_exclude varchar(8000) = NULL, -- List of columns to be excluded from the MERGE statement
+ @cols_to_join_on varchar(8000) = NULL, -- List of columns needed to JOIN the source table to the target table (useful when @table_name is missing a primary key) 
  @update_only_if_changed bit = 1, -- When 1, only performs an UPDATE operation if an included column in a matched row has changed.
  @delete_if_not_matched bit = 1, -- When 1, deletes unmatched source rows from target, when 0 source rows will only be used to update existing rows or insert new.
  @disable_constraints bit = 0, -- When 1, disables foreign key constraints and enables them after the MERGE statement
@@ -158,6 +159,11 @@ Example 12: To avoid checking the foreign key constraints while loading data wit
 Example 13: To exclude computed columns from the MERGE statement:
 
  EXEC sp_generate_merge 'MyTable', @ommit_computed_cols = 1
+
+Example 14: To generate a MERGE statement for a table that lacks a primary key:
+ 
+ EXEC sp_generate_merge 'StateProvince', @schema = 'Person', @cols_to_join_on = "'StateProvinceCode'"
+
  
 ***********************************************************************************************************/
 
@@ -172,12 +178,12 @@ IF ((@cols_to_include IS NOT NULL) AND (@cols_to_exclude IS NOT NULL))
  END
 
 
---Making sure the @cols_to_include and @cols_to_exclude parameters are receiving values in proper format
+--Making sure the @cols_to_include, @cols_to_exclude and @cols_to_join_on parameters are receiving values in proper format
 IF ((@cols_to_include IS NOT NULL) AND (PATINDEX('''%''',@cols_to_include) = 0))
  BEGIN
  RAISERROR('Invalid use of @cols_to_include property',16,1)
  PRINT 'Specify column names surrounded by single quotes and separated by commas'
- PRINT 'Eg: EXEC sp_generate_merge titles, @cols_to_include = "''title_id'',''title''"'
+ PRINT 'Eg: EXEC sp_generate_merge "titles", @cols_to_include = "''title_id'',''title''"'
  RETURN -1 --Failure. Reason: Invalid use of @cols_to_include property
  END
 
@@ -185,8 +191,16 @@ IF ((@cols_to_exclude IS NOT NULL) AND (PATINDEX('''%''',@cols_to_exclude) = 0))
  BEGIN
  RAISERROR('Invalid use of @cols_to_exclude property',16,1)
  PRINT 'Specify column names surrounded by single quotes and separated by commas'
- PRINT 'Eg: EXEC sp_generate_merge titles, @cols_to_exclude = "''title_id'',''title''"'
+ PRINT 'Eg: EXEC sp_generate_merge "titles", @cols_to_exclude = "''title_id'',''title''"'
  RETURN -1 --Failure. Reason: Invalid use of @cols_to_exclude property
+ END
+
+IF ((@cols_to_join_on IS NOT NULL) AND (PATINDEX('''%''',@cols_to_join_on) = 0))
+ BEGIN
+ RAISERROR('Invalid use of @cols_to_join_on property',16,1)
+ PRINT 'Specify column names surrounded by single quotes and separated by commas'
+ PRINT 'Eg: EXEC sp_generate_merge "StateProvince", @schema = "Person", @cols_to_join_on = "''StateProvinceCode''"'
+ RETURN -1 --Failure. Reason: Invalid use of @cols_to_join_on property
  END
 
 
@@ -446,22 +460,34 @@ DECLARE @PK_column_joins VARCHAR(8000)
 SET @PK_column_list = ''
 SET @PK_column_joins = ''
 
-SELECT @PK_column_list = @PK_column_list + '[' + c.COLUMN_NAME + '], '
-, @PK_column_joins = @PK_column_joins + '[Target].[' + c.COLUMN_NAME + '] = [Source].[' + c.COLUMN_NAME + '] AND '
-FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk ,
-INFORMATION_SCHEMA.KEY_COLUMN_USAGE c
-WHERE pk.TABLE_NAME = @table_name
-AND pk.TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
-AND CONSTRAINT_TYPE = 'PRIMARY KEY'
-AND c.TABLE_NAME = pk.TABLE_NAME
-AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
-AND c.CONSTRAINT_NAME = pk.CONSTRAINT_NAME
+IF ISNULL(@cols_to_join_on, '') = '' -- Use primary key of the source table as the basis of MERGE joins, if no join list is specified
+BEGIN
+	SELECT @PK_column_list = @PK_column_list + '[' + c.COLUMN_NAME + '], '
+	, @PK_column_joins = @PK_column_joins + '[Target].[' + c.COLUMN_NAME + '] = [Source].[' + c.COLUMN_NAME + '] AND '
+	FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk ,
+	INFORMATION_SCHEMA.KEY_COLUMN_USAGE c
+	WHERE pk.TABLE_NAME = @table_name
+	AND pk.TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
+	AND CONSTRAINT_TYPE = 'PRIMARY KEY'
+	AND c.TABLE_NAME = pk.TABLE_NAME
+	AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
+	AND c.CONSTRAINT_NAME = pk.CONSTRAINT_NAME
+END
+ELSE
+BEGIN
+	SELECT @PK_column_list = @PK_column_list + '[' + c.COLUMN_NAME + '], '
+	, @PK_column_joins = @PK_column_joins + '[Target].[' + c.COLUMN_NAME + '] = [Source].[' + c.COLUMN_NAME + '] AND '
+	FROM INFORMATION_SCHEMA.COLUMNS AS c
+	WHERE @cols_to_join_on LIKE '%''' + c.COLUMN_NAME + '''%'
+	AND c.TABLE_NAME = @table_name
+	AND c.TABLE_SCHEMA = @schema
+END
 
-IF IsNull(@PK_column_list, '') = '' 
- BEGIN
- RAISERROR('Table has no primary keys. There should at least be one column in order to have a valid join.',16,1)
- RETURN -1 --Failure. Reason: looks like table doesn't have any primary keys
- END
+IF ISNULL(@PK_column_list, '') = '' 
+BEGIN
+	RAISERROR('Table does not have a primary key from which to generate the join clause(s) and/or a valid @cols_to_join_on has not been specified. Either add a primary key/composite key to the table or specify the @cols_to_join_on parameter.',16,1)
+	RETURN -1 --Failure. Reason: looks like table doesn't have any primary keys
+END
 
 SET @PK_column_list = LEFT(@PK_column_list, LEN(@PK_column_list) -1)
 SET @PK_column_joins = LEFT(@PK_column_joins, LEN(@PK_column_joins) -4)
