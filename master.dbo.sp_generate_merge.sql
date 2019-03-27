@@ -17,10 +17,10 @@ GO
 
 CREATE PROC [sp_generate_merge]
 (
- @table_name varchar(776), -- The table/view for which the MERGE statement will be generated using the existing data
- @target_table varchar(776) = NULL, -- Use this parameter to specify a different table name into which the data will be inserted/updated/deleted
+ @table_name varchar(776), -- The table/view for which the MERGE statement will be generated using the existing data. This parameter accepts unquoted single-part identifiers only (e.g. MyTable)
+ @target_table varchar(776) = NULL, -- Use this parameter to specify a different table name into which the data will be inserted/updated/deleted. This parameter accepts unquoted single-part identifiers (e.g. MyTable) or quoted multi-part identifiers (e.g. [OtherDb].[dbo].[MyTable])
  @from nvarchar(max) = NULL, -- Use this parameter to filter the rows based on a filter condition (using WHERE)
- @include_values bit = 1, -- When 1, a VALUES clause containing data from @table_name is generated. When 0, data will be sourced directly from @table_name when the MERGE is executed.
+ @include_values bit = 1, -- When 1, a VALUES clause containing data from @table_name is generated. When 0, data will be sourced directly from @table_name when the MERGE is executed (see example 15 for use case)
  @include_timestamp bit = 0, -- [DEPRECATED] Sql Server does not allow modification of TIMESTAMP datatype
  @debug_mode bit = 0, -- If @debug_mode is set to 1, the SQL statements constructed by this procedure will be printed for later examination
  @schema varchar(64) = NULL, -- Use this parameter if you are not the owner of the table
@@ -164,6 +164,10 @@ Example 14: To generate a MERGE statement for a table that lacks a primary key:
  
  EXEC sp_generate_merge 'StateProvince', @schema = 'Person', @cols_to_join_on = "'StateProvinceCode'"
 
+Example 15: To generate a statement that MERGEs data directly from the source table to a table in another database:
+
+EXEC sp_generate_merge 'StateProvince', @schema = 'Person', @include_values = 0, @target_table = '[OtherDb].[Person].[StateProvince]'
+
  
 ***********************************************************************************************************/
 
@@ -264,14 +268,32 @@ SET @Column_List_For_Check = ''
 SET @Actual_Values = ''
 
 --Variable Defaults
-IF @schema IS NULL
+IF @target_table IS NOT NULL AND (@target_table LIKE '%.%' OR @target_table LIKE '\[%\]' ESCAPE '\')
+BEGIN
+ IF NOT @target_table LIKE '\[%\]' ESCAPE '\'
  BEGIN
- SET @Target_Table_For_Output = QUOTENAME(COALESCE(@target_table, @table_name))
+  RAISERROR('Ambiguous value for @target_table specified. Use QUOTENAME() to ensure the identifer is fully qualified (e.g. [dbo].[Titles] or [OtherDb].[dbo].[Titles]).',16,1)
  END
+
+ -- If the user has specified the @schema param, but the qualified @target_table they've specified does not include the target schema, then fail validation to avoid any ambiguity
+ IF @schema IS NOT NULL AND @target_table NOT LIKE '%.%'
+ BEGIN
+  RAISERROR('The specified @target_table is missing a schema name (e.g. [dbo].[Titles]).',16,1)
+ END
+
+ SET @Target_Table_For_Output = @target_table 
+END
 ELSE
+BEGIN
+ IF @schema IS NULL
  BEGIN
- SET @Target_Table_For_Output = QUOTENAME(@schema) + '.' + QUOTENAME(COALESCE(@target_table, @table_name))
+  SET @Target_Table_For_Output = QUOTENAME(COALESCE(@target_table, @table_name))
  END
+ ELSE
+ BEGIN
+  SET @Target_Table_For_Output = QUOTENAME(@schema) + '.' + QUOTENAME(COALESCE(@target_table, @table_name))
+ END
+END
 
 SET @Source_Table_Qualified = QUOTENAME(COALESCE(@schema,SCHEMA_NAME())) + '.' + QUOTENAME(@table_name)
 
