@@ -501,7 +501,7 @@ SET @Actual_Values =
  ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + @PK_column_list + ') = 1 THEN '' '' ELSE '','' END + ''(''+ ' + @Actual_Values + '+'')''' + ' ' + 
  COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ORDER BY ' + @PK_column_list)
 
- DECLARE @output VARCHAR(MAX) = ''
+ DECLARE @output NVARCHAR(MAX) = ''
  DECLARE @b CHAR(1) = CHAR(13)
 
 --Determining whether to ouput any debug information
@@ -573,7 +573,7 @@ BEGIN
 
  IF (SELECT COUNT(*) FROM @tab) <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
  BEGIN
-  SET @output += 'VALUES' + CAST((SELECT @b + val FROM @tab ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'VARCHAR(MAX)');
+  SET @output += 'VALUES' + CAST((SELECT @b + val FROM @tab ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'NVARCHAR(MAX)');
  END
  ELSE
  BEGIN
