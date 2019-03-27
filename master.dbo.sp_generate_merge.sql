@@ -25,7 +25,7 @@ CREATE PROC [sp_generate_merge]
  @debug_mode bit = 0, -- If @debug_mode is set to 1, the SQL statements constructed by this procedure will be printed for later examination
  @schema varchar(64) = NULL, -- Use this parameter if you are not the owner of the table
  @ommit_images bit = 0, -- Use this parameter to generate MERGE statement by omitting the 'image' columns
- @ommit_identity bit = 0, -- Use this parameter to ommit the identity columns
+ @ommit_identity bit = 0, -- Use this parameter to omit the identity columns
  @top int = NULL, -- Use this parameter to generate a MERGE statement only for the TOP n rows
  @cols_to_include varchar(8000) = NULL, -- List of columns to be included in the MERGE statement
  @cols_to_exclude varchar(8000) = NULL, -- List of columns to be excluded from the MERGE statement
@@ -38,7 +38,7 @@ CREATE PROC [sp_generate_merge]
  @results_to_text bit = 0, -- When 1, outputs results to grid/messages window. When 0, outputs MERGE statement in an XML fragment.
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
- @batch_separator VARCHAR(50) = 'GO' -- Batch separator to use
+ @batch_separator varchar(50) = 'GO' -- Batch separator to use
 )
 AS
 BEGIN
