@@ -273,12 +273,14 @@ BEGIN
  IF NOT @target_table LIKE '\[%\]' ESCAPE '\'
  BEGIN
   RAISERROR('Ambiguous value for @target_table specified. Use QUOTENAME() to ensure the identifer is fully qualified (e.g. [dbo].[Titles] or [OtherDb].[dbo].[Titles]).',16,1)
+  RETURN -1 --Failure. Reason: The value could be a multi-part object identifier or it could be a single-part object identifier that just happens to include a period character
  END
 
  -- If the user has specified the @schema param, but the qualified @target_table they've specified does not include the target schema, then fail validation to avoid any ambiguity
  IF @schema IS NOT NULL AND @target_table NOT LIKE '%.%'
  BEGIN
   RAISERROR('The specified @target_table is missing a schema name (e.g. [dbo].[Titles]).',16,1)
+  RETURN -1 --Failure. Reason: Omitting the schema in this scenario is likely a mistake
  END
 
  SET @Target_Table_For_Output = @target_table 
