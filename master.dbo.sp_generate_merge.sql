@@ -480,7 +480,7 @@ BEGIN
 	FROM INFORMATION_SCHEMA.COLUMNS AS c
 	WHERE @cols_to_join_on LIKE '%''' + c.COLUMN_NAME + '''%'
 	AND c.TABLE_NAME = @table_name
-	AND c.TABLE_SCHEMA = @schema
+	AND c.TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
 END
 
 IF ISNULL(@PK_column_list, '') = '' 
