@@ -25,7 +25,7 @@ CREATE PROC [sp_generate_merge]
  @debug_mode bit = 0, -- If @debug_mode is set to 1, the SQL statements constructed by this procedure will be printed for later examination
  @schema varchar(64) = NULL, -- Use this parameter if you are not the owner of the table
  @ommit_images bit = 0, -- Use this parameter to generate MERGE statement by omitting the 'image' columns
- @ommit_identity bit = 0, -- Use this parameter to ommit the identity columns
+ @ommit_identity bit = 0, -- Use this parameter to omit the identity columns
  @top int = NULL, -- Use this parameter to generate a MERGE statement only for the TOP n rows
  @cols_to_include varchar(8000) = NULL, -- List of columns to be included in the MERGE statement
  @cols_to_exclude varchar(8000) = NULL, -- List of columns to be excluded from the MERGE statement
@@ -33,12 +33,12 @@ CREATE PROC [sp_generate_merge]
  @update_only_if_changed bit = 1, -- When 1, only performs an UPDATE operation if an included column in a matched row has changed.
  @delete_if_not_matched bit = 1, -- When 1, deletes unmatched source rows from target, when 0 source rows will only be used to update existing rows or insert new.
  @disable_constraints bit = 0, -- When 1, disables foreign key constraints and enables them after the MERGE statement
- @ommit_computed_cols bit = 0, -- When 1, computed columns will not be included in the MERGE statement
+ @ommit_computed_cols bit = 1, -- When 1, computed columns will not be included in the MERGE statement
  @include_use_db bit = 1, -- When 1, includes a USE [DatabaseName] statement at the beginning of the generated batch
  @results_to_text bit = 0, -- When 1, outputs results to grid/messages window. When 0, outputs MERGE statement in an XML fragment.
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
- @batch_separator VARCHAR(50) = 'GO' -- Batch separator to use
+ @batch_separator varchar(50) = 'GO' -- Batch separator to use
 )
 AS
 BEGIN
@@ -273,12 +273,14 @@ BEGIN
  IF NOT @target_table LIKE '\[%\]' ESCAPE '\'
  BEGIN
   RAISERROR('Ambiguous value for @target_table specified. Use QUOTENAME() to ensure the identifer is fully qualified (e.g. [dbo].[Titles] or [OtherDb].[dbo].[Titles]).',16,1)
+  RETURN -1 --Failure. Reason: The value could be a multi-part object identifier or it could be a single-part object identifier that just happens to include a period character
  END
 
  -- If the user has specified the @schema param, but the qualified @target_table they've specified does not include the target schema, then fail validation to avoid any ambiguity
  IF @schema IS NOT NULL AND @target_table NOT LIKE '%.%'
  BEGIN
   RAISERROR('The specified @target_table is missing a schema name (e.g. [dbo].[Titles]).',16,1)
+  RETURN -1 --Failure. Reason: Omitting the schema in this scenario is likely a mistake
  END
 
  SET @Target_Table_For_Output = @target_table 
@@ -351,6 +353,7 @@ END
  BEGIN
  IF (SELECT COLUMNPROPERTY( OBJECT_ID(@Source_Table_Qualified),SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsComputed')) = 1 
  BEGIN
+ PRINT 'Warning: The ' + @Column_Name + ' computed column will be excluded from the MERGE statement. Specify @ommit_computed_cols = 0 to include computed columns.'
  GOTO SKIP_LOOP 
  END
  END
