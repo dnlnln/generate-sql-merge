@@ -19,7 +19,7 @@ CREATE PROC [sp_generate_merge]
 (
  @table_name varchar(776), -- The table/view for which the MERGE statement will be generated using the existing data. This parameter accepts unquoted single-part identifiers only (e.g. MyTable)
  @target_table varchar(776) = NULL, -- Use this parameter to specify a different table name into which the data will be inserted/updated/deleted. This parameter accepts unquoted single-part identifiers (e.g. MyTable) or quoted multi-part identifiers (e.g. [OtherDb].[dbo].[MyTable])
- @from nvarchar(max) = NULL, -- Use this parameter to filter the rows based on a filter condition (using WHERE)
+ @from nvarchar(max) = NULL, -- Use this parameter to filter the rows based on a filter condition (using WHERE). Note: To avoid inconsistent ordering of results, including an ORDER BY clause is highly recommended
  @include_values bit = 1, -- When 1, a VALUES clause containing data from @table_name is generated. When 0, data will be sourced directly from @table_name when the MERGE is executed (see example 15 for use case)
  @include_timestamp bit = 0, -- [DEPRECATED] Sql Server does not allow modification of TIMESTAMP datatype
  @debug_mode bit = 0, -- If @debug_mode is set to 1, the SQL statements constructed by this procedure will be printed for later examination
@@ -120,7 +120,7 @@ Example 4: To generate a MERGE statement for 'titles' table for only those title
  which contain the word 'Computer' in them:
  NOTE: Do not complicate the FROM or WHERE clause here. It's assumed that you are good with T-SQL if you are using this parameter
 
- EXEC sp_generate_merge 'titles', @from = "from titles where title like '%Computer%'"
+ EXEC sp_generate_merge 'titles', @from = "from titles where title like '%Computer%' order by title_id"
 
 Example 5: To print the debug information:
 
@@ -523,7 +523,7 @@ SET @Actual_Values =
  'SELECT ' + 
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
  '''' + 
- ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY ' + @PK_column_list + ') = 1 THEN '' '' ELSE '','' END + ''(''+ ' + @Actual_Values + '+'')''' + ' ' + 
+ ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) = 1 THEN '' '' ELSE '','' END + ''(''+ ' + @Actual_Values + '+'')''' + ' ' + 
  COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ORDER BY ' + @PK_column_list)
 
  DECLARE @output NVARCHAR(MAX) = ''
