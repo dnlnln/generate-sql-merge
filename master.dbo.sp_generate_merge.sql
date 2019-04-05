@@ -34,6 +34,7 @@ CREATE PROC [sp_generate_merge]
  @delete_if_not_matched bit = 1, -- When 1, deletes unmatched source rows from target, when 0 source rows will only be used to update existing rows or insert new.
  @disable_constraints bit = 0, -- When 1, disables foreign key constraints and enables them after the MERGE statement
  @ommit_computed_cols bit = 1, -- When 1, computed columns will not be included in the MERGE statement
+ @ommit_generated_always_cols bit = 1, -- When 1, GENERATED ALWAYS columns will not be included in the MERGE statement
  @include_use_db bit = 1, -- When 1, includes a USE [DatabaseName] statement at the beginning of the generated batch
  @results_to_text bit = 0, -- When 1, outputs results to grid/messages window. When 0, outputs MERGE statement in an XML fragment.
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
@@ -357,6 +358,15 @@ END
  GOTO SKIP_LOOP 
  END
  END
+
+ --Skip this column if it is the GENERATED ALWAYS type, unless the user specifically wants those types of columns included
+ IF @ommit_generated_always_cols = 1
+ IF ISNULL((SELECT COLUMNPROPERTY( OBJECT_ID(@Source_Table_Qualified),SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'GeneratedAlwaysType')), 0) <> 0
+ BEGIN
+ PRINT 'Warning: The ' + @Column_Name + ' GENERATED ALWAYS column will be excluded from the MERGE statement. Specify @ommit_generated_always_cols = 0 to include GENERATED ALWAYS columns.'
+ GOTO SKIP_LOOP 
+ END
+
  
  --Tables with columns of IMAGE data type are not supported for obvious reasons
  IF(@Data_Type in ('image'))
