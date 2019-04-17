@@ -27,9 +27,9 @@ CREATE PROC [sp_generate_merge]
  @ommit_images bit = 0, -- Use this parameter to generate MERGE statement by omitting the 'image' columns
  @ommit_identity bit = 0, -- Use this parameter to omit the identity columns
  @top int = NULL, -- Use this parameter to generate a MERGE statement only for the TOP n rows
- @cols_to_include varchar(8000) = NULL, -- List of columns to be included in the MERGE statement
- @cols_to_exclude varchar(8000) = NULL, -- List of columns to be excluded from the MERGE statement
- @cols_to_join_on varchar(8000) = NULL, -- List of columns needed to JOIN the source table to the target table (useful when @table_name is missing a primary key) 
+ @cols_to_include varchar(max) = NULL, -- List of columns to be included in the MERGE statement
+ @cols_to_exclude varchar(max) = NULL, -- List of columns to be excluded from the MERGE statement
+ @cols_to_join_on varchar(max) = NULL, -- List of columns needed to JOIN the source table to the target table (useful when @table_name is missing a primary key) 
  @update_only_if_changed bit = 1, -- When 1, only performs an UPDATE operation if an included column in a matched row has changed.
  @delete_if_not_matched bit = 1, -- When 1, deletes unmatched source rows from target, when 0 source rows will only be used to update existing rows or insert new.
  @disable_constraints bit = 0, -- When 1, disables foreign key constraints and enables them after the MERGE statement
@@ -245,9 +245,9 @@ ELSE
 
 --Variable declarations
 DECLARE @Column_ID int, 
- @Column_List varchar(8000), 
- @Column_List_For_Update varchar(8000), 
- @Column_List_For_Check varchar(8000), 
+ @Column_List varchar(max), 
+ @Column_List_For_Update varchar(max), 
+ @Column_List_For_Check varchar(max), 
  @Column_Name varchar(128), 
  @Column_Name_Unquoted varchar(128), 
  @Data_Type varchar(128), 
@@ -490,8 +490,8 @@ IF LEN(LTRIM(@Column_List)) = 0
 
 
 --Get the join columns ----------------------------------------------------------
-DECLARE @PK_column_list VARCHAR(8000)
-DECLARE @PK_column_joins VARCHAR(8000)
+DECLARE @PK_column_list VARCHAR(max)
+DECLARE @PK_column_joins VARCHAR(max)
 SET @PK_column_list = ''
 SET @PK_column_joins = ''
 
