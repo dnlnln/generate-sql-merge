@@ -49,7 +49,7 @@ Simply execute the script, which will install it in `[master]` database as a sys
 
 
 ## Known Limitations
-This procedure has explicit support for the following datatypes: (small)datetime(2), (n)varchar, (n)text, (n)char, int, float, real, (small)money, timestamp, rowversion, uniqueidentifier and (var)binary. All others are implicitly converted to their CHAR representations so YMMV depending on the datatype. Additionally, this procedure has not been extensively tested with UNICODE datatypes.
+This procedure has explicit support for the following datatypes: (small)datetime(2), datetimeoffset, (n)varchar, (n)text, (n)char, xml, int, float, real, (small)money, timestamp, rowversion, uniqueidentifier, (var)binary, hierarchyid, geometry and geography. All others are implicitly converted to their CHAR representations so YMMV depending on the datatype.
 
 The Image datatype is not supported and an error will be thrown if these are not excluded using the `@cols_to_exclude` parameter.
 
