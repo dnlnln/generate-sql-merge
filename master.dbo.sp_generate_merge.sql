@@ -17,19 +17,19 @@ GO
 
 CREATE PROC [sp_generate_merge]
 (
- @table_name varchar(776), -- The table/view for which the MERGE statement will be generated using the existing data. This parameter accepts unquoted single-part identifiers only (e.g. MyTable)
- @target_table varchar(776) = NULL, -- Use this parameter to specify a different table name into which the data will be inserted/updated/deleted. This parameter accepts unquoted single-part identifiers (e.g. MyTable) or quoted multi-part identifiers (e.g. [OtherDb].[dbo].[MyTable])
+ @table_name nvarchar(776), -- The table/view for which the MERGE statement will be generated using the existing data. This parameter accepts unquoted single-part identifiers only (e.g. MyTable)
+ @target_table nvarchar(776) = NULL, -- Use this parameter to specify a different table name into which the data will be inserted/updated/deleted. This parameter accepts unquoted single-part identifiers (e.g. MyTable) or quoted multi-part identifiers (e.g. [OtherDb].[dbo].[MyTable])
  @from nvarchar(max) = NULL, -- Use this parameter to filter the rows based on a filter condition (using WHERE). Note: To avoid inconsistent ordering of results, including an ORDER BY clause is highly recommended
  @include_values bit = 1, -- When 1, a VALUES clause containing data from @table_name is generated. When 0, data will be sourced directly from @table_name when the MERGE is executed (see example 15 for use case)
  @include_timestamp bit = 0, -- [DEPRECATED] Sql Server does not allow modification of TIMESTAMP datatype
  @debug_mode bit = 0, -- If @debug_mode is set to 1, the SQL statements constructed by this procedure will be printed for later examination
- @schema varchar(64) = NULL, -- Use this parameter if you are not the owner of the table
+ @schema nvarchar(64) = NULL, -- Use this parameter if you are not the owner of the table
  @ommit_images bit = 0, -- Use this parameter to generate MERGE statement by omitting the 'image' columns
  @ommit_identity bit = 0, -- Use this parameter to omit the identity columns
  @top int = NULL, -- Use this parameter to generate a MERGE statement only for the TOP n rows
- @cols_to_include varchar(max) = NULL, -- List of columns to be included in the MERGE statement
- @cols_to_exclude varchar(max) = NULL, -- List of columns to be excluded from the MERGE statement
- @cols_to_join_on varchar(max) = NULL, -- List of columns needed to JOIN the source table to the target table (useful when @table_name is missing a primary key) 
+ @cols_to_include nvarchar(max) = NULL, -- List of columns to be included in the MERGE statement
+ @cols_to_exclude nvarchar(max) = NULL, -- List of columns to be excluded from the MERGE statement
+ @cols_to_join_on nvarchar(max) = NULL, -- List of columns needed to JOIN the source table to the target table (useful when @table_name is missing a primary key) 
  @update_only_if_changed bit = 1, -- When 1, only performs an UPDATE operation if an included column in a matched row has changed.
  @delete_if_not_matched bit = 1, -- When 1, deletes unmatched source rows from target, when 0 source rows will only be used to update existing rows or insert new.
  @disable_constraints bit = 0, -- When 1, disables foreign key constraints and enables them after the MERGE statement
@@ -39,7 +39,7 @@ CREATE PROC [sp_generate_merge]
  @results_to_text bit = 0, -- When 1, outputs results to grid/messages window. When 0, outputs MERGE statement in an XML fragment.
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
- @batch_separator varchar(50) = 'GO' -- Batch separator to use
+ @batch_separator nvarchar(50) = 'GO' -- Batch separator to use
 )
 AS
 BEGIN
@@ -94,11 +94,7 @@ Acknowledgements (sp_generate_inserts):
  Artur Zeygman -- For helping me simplify a bit of code for handling non-dbo owned tables
  Joris Laperre -- For reporting a regression bug in handling text/ntext columns
 
-NOTE: This procedure may not work with tables with a large number of columns (> 500).
- Results can be unpredictable with huge text columns or SQL Server 2000's sql_variant data types
- IMPORTANT: This procedure has not been extensively tested with international data (Extended characters or Unicode). If needed
- you might want to convert the datatypes of character variables in this procedure to their respective unicode counterparts
- like nchar and nvarchar
+NOTE: Results can be unpredictable with huge text columns or SQL Server 2000's sql_variant data types
 
 Get Started: Ensure that your SQL client is configured to send results to grid (default SSMS behaviour).
 This ensures that the generated MERGE statement can be output in full, getting around SSMS's 4000 nchar limit.
@@ -245,16 +241,16 @@ ELSE
 
 --Variable declarations
 DECLARE @Column_ID int, 
- @Column_List varchar(max), 
- @Column_List_For_Update varchar(max), 
- @Column_List_For_Check varchar(max), 
- @Column_Name varchar(128), 
- @Column_Name_Unquoted varchar(128), 
- @Data_Type varchar(128), 
+ @Column_List nvarchar(max), 
+ @Column_List_For_Update nvarchar(max), 
+ @Column_List_For_Check nvarchar(max), 
+ @Column_Name nvarchar(128), 
+ @Column_Name_Unquoted nvarchar(128), 
+ @Data_Type nvarchar(128), 
  @Actual_Values nvarchar(max), --This is the string that will be finally executed to generate a MERGE statement
- @IDN varchar(128), --Will contain the IDENTITY column's name in the table
- @Target_Table_For_Output varchar(776),
- @Source_Table_Qualified varchar(776)
+ @IDN nvarchar(128), --Will contain the IDENTITY column's name in the table
+ @Target_Table_For_Output nvarchar(776),
+ @Source_Table_Qualified nvarchar(776)
  
  
 
@@ -490,8 +486,8 @@ IF LEN(LTRIM(@Column_List)) = 0
 
 
 --Get the join columns ----------------------------------------------------------
-DECLARE @PK_column_list VARCHAR(max)
-DECLARE @PK_column_joins VARCHAR(max)
+DECLARE @PK_column_list NVARCHAR(max)
+DECLARE @PK_column_joins NVARCHAR(max)
 SET @PK_column_list = ''
 SET @PK_column_joins = ''
 
