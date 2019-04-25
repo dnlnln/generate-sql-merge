@@ -53,6 +53,8 @@ This procedure has explicit support for the following datatypes: (small)datetime
 
 The Image datatype is not supported and an error will be thrown if these are not excluded using the `@cols_to_exclude` parameter.
 
+When using the `@hash_compare_column` parameter, all columns in the source and target table must be implicitly convertible to strings (due to the use of `CONCAT` in the proc to calculate the hash value). This means that the following data types are not supported with `@hash_compare_column`: xml, hierarchyid, geometry and geography.
+
 
 ## Usage
 1. Ensure that your SQL client is configured to send results to grid.

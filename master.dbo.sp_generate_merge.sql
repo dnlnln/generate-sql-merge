@@ -31,6 +31,7 @@ CREATE PROC [sp_generate_merge]
  @cols_to_exclude nvarchar(max) = NULL, -- List of columns to be excluded from the MERGE statement
  @cols_to_join_on nvarchar(max) = NULL, -- List of columns needed to JOIN the source table to the target table (useful when @table_name is missing a primary key) 
  @update_only_if_changed bit = 1, -- When 1, only performs an UPDATE operation if an included column in a matched row has changed.
+ @hash_compare_column nvarchar(128) = NULL, -- When specified, change detection will be based on a SHA2_256 hash of the source data (the hash value will be stored in this @target_table column for later comparison; see Example 16)
  @delete_if_not_matched bit = 1, -- When 1, deletes unmatched source rows from target, when 0 source rows will only be used to update existing rows or insert new.
  @disable_constraints bit = 0, -- When 1, disables foreign key constraints and enables them after the MERGE statement
  @ommit_computed_cols bit = 1, -- When 1, computed columns will not be included in the MERGE statement
@@ -79,6 +80,9 @@ Written by: Narayana Vyas Kondreddi
 
 
 Acknowledgements (sp_generate_merge):
+ Christian Lorber -- Contributed hashvalue-based change detection that enables efficient ETL implementations
+ https://twitter.com/chlorber
+
  Nathan Skerl -- StackOverflow answer that provided a workaround for the output truncation problem
  http://stackoverflow.com/a/10489767/266882
 
@@ -165,6 +169,17 @@ Example 15: To generate a statement that MERGEs data directly from the source ta
 
 EXEC sp_generate_merge 'StateProvince', @schema = 'Person', @include_values = 0, @target_table = '[OtherDb].[Person].[StateProvince]'
 
+Example 16: To generate a MERGE statement that will update the target table if the calculated hash value of the source does not match the [Hashvalue] column in the target:
+
+EXEC [DB].dbo.[sp_generate_merge] 
+@schema = 'Person', 
+@target_table = '[DB].[Person].[StateProvince]', 
+@table_name = 'v_StateProvince',
+@include_values = 0,   
+@hash_compare_column = 'Hashvalue',
+@include_rowsaffected = 0,
+@nologo = 1,
+@cols_to_join_on = "'ID'"
  
 ***********************************************************************************************************/
 
@@ -204,6 +219,19 @@ IF ((@cols_to_join_on IS NOT NULL) AND (PATINDEX('''%''',@cols_to_join_on) = 0))
  RETURN -1 --Failure. Reason: Invalid use of @cols_to_join_on property
  END
 
+ IF @hash_compare_column IS NOT NULL AND @update_only_if_changed = 0
+ BEGIN
+	RAISERROR('Invalid use of @update_only_if_changed property',16,1)
+	PRINT 'The @hash_compare_column param is set, however @update_only_if_changed is set to 0. To utilize hash-based change detection, please ensure @update_only_if_changed is set to 1.'
+	RETURN -1 --Failure. Reason: Invalid use of @update_only_if_changed property
+ END	
+
+ IF @hash_compare_column IS NOT NULL AND @include_values = 1
+ BEGIN
+	RAISERROR('Invalid use of @include_values',16,1)
+	PRINT 'Using @hash_compare_column together with @include_values is currenty unsupported. Our intention is to support this in the future, however for now @hash_compare_column can only be specified when @include_values=0'
+	RETURN -1 --Failure. Reason: Invalid use of @include_values property
+ END
 
 --Checking to see if the database name is specified along wih the table name
 --Your database context should be local to the table for which you want to generate a MERGE statement
@@ -250,8 +278,32 @@ DECLARE @Column_ID int,
  @Actual_Values nvarchar(max), --This is the string that will be finally executed to generate a MERGE statement
  @IDN nvarchar(128), --Will contain the IDENTITY column's name in the table
  @Target_Table_For_Output nvarchar(776),
- @Source_Table_Qualified nvarchar(776)
- 
+ @Source_Table_Qualified nvarchar(776),
+ @sql nvarchar(max),  --SQL statement that will be executed to check existence of [Hashvalue] column in case @hash_compare_column is used
+ @checkhashcolumn nvarchar(128),
+ @SourceHashColumn bit = 0
+
+ IF @hash_compare_column IS NOT NULL  --Check existence of column [Hashvalue] in target table and raise error in case of missing
+ BEGIN
+ IF @target_table IS NULL
+ BEGIN
+	SET @target_table = @table_name
+ END		
+ SET @SQL =
+	'SELECT @columnname = column_name
+	FROM ' + COALESCE(PARSENAME(@target_table,3),DB_NAME()) + '.INFORMATION_SCHEMA.COLUMNS (NOLOCK)
+	WHERE TABLE_NAME = ''' + PARSENAME(@target_table,1) + '''' +
+	' AND TABLE_SCHEMA = ' + '''' + COALESCE(@schema, SCHEMA_NAME()) + '''' + ' AND [COLUMN_NAME] = ''' + @hash_compare_column + ''''
+
+	EXECUTE sp_executesql @sql, N'@columnname nvarchar(128) OUTPUT', @columnname = @checkhashcolumn OUTPUT
+	IF @checkhashcolumn IS NULL
+	BEGIN
+	  RAISERROR('Column %s not found ',16,1, @hash_compare_column)
+	  PRINT 'The specified @hash_compare_column [' + @hash_compare_column +  '] does not exist in ' + QUOTENAME(@target_table) + '. Please make sure that [' + @hash_compare_column + '] VARBINARY (8000) exits in the target table'
+	  RETURN -1 --Failure. Reason: There is no column that can be used as the basis of Hashcompare
+	END	
+
+ END
  
 
 --Variable Initialization
@@ -280,10 +332,10 @@ BEGIN
   RETURN -1 --Failure. Reason: Omitting the schema in this scenario is likely a mistake
  END
 
- SET @Target_Table_For_Output = @target_table 
-END
-ELSE
-BEGIN
+  SET @Target_Table_For_Output = @target_table 
+ END
+ ELSE
+ BEGIN
  IF @schema IS NULL
  BEGIN
   SET @Target_Table_For_Output = QUOTENAME(COALESCE(@target_table, @table_name))
@@ -363,6 +415,11 @@ END
  GOTO SKIP_LOOP 
  END
 
+ --make sure if source table already contains @hash_compare_column to avoid being doubled in UPDATE clause
+ IF  @hash_compare_column IS NOT NULL AND @Column_Name = QUOTENAME(@hash_compare_column)
+ BEGIN
+	SET @SourceHashColumn = 1
+ END
  
  --Tables with columns of IMAGE data type are not supported for obvious reasons
  IF(@Data_Type in ('image'))
@@ -425,7 +482,10 @@ END
  END + '+' + ''',''' + ' + '
  
  --Generating the column list for the MERGE statement
- SET @Column_List = @Column_List + @Column_Name + ',' 
+ SET @Column_List = @Column_List +  
+ CASE WHEN @hash_compare_column IS NOT NULL AND @Column_Name = QUOTENAME(@hash_compare_column)
+ THEN ''
+ ELSE @Column_Name + ',' END
  
  --Don't update Primary Key or Identity columns
  IF NOT EXISTS(
@@ -441,7 +501,7 @@ END
  AND c.COLUMN_NAME = @Column_Name_Unquoted 
  )
  BEGIN
- SET @Column_List_For_Update = @Column_List_For_Update + @Column_Name + ' = [Source].' + @Column_Name + ', 
+  SET @Column_List_For_Update = @Column_List_For_Update + '[Target].' + @Column_Name + ' = [Source].' + @Column_Name + ', 
   ' 
  SET @Column_List_For_Check = @Column_List_For_Check +
  CASE @Data_Type 
@@ -532,7 +592,8 @@ SET @Actual_Values =
  ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) = 1 THEN '' '' ELSE '','' END + ''(''+ ' + @Actual_Values + '+'')''' + ' ' + 
  COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ORDER BY ' + @PK_column_list)
 
- DECLARE @output NVARCHAR(MAX) = ''
+ DECLARE @output NVARCHAR(MAX) 
+ SET @output = CASE WHEN @results_to_text = 1 THEN '' ELSE '---' END
  DECLARE @b CHAR(1) = CHAR(13)
 
 --Determining whether to ouput any debug information
@@ -557,19 +618,20 @@ IF @debug_mode =1
  END
  
 IF (@include_use_db = 1)
-BEGIN
-	SET @output += 'USE [' + DB_NAME() + ']'
+ BEGIN
+	SET @output += @b 
+	SET @output += @b + 'USE [' + DB_NAME() + ']'
 	SET @output += @b + @batch_separator
-	SET @output += @b + @b
-END
+	SET @output += @b 
+ END
 
 IF (@nologo = 0)
-BEGIN
+ BEGIN
  SET @output += @b + '--MERGE generated by ''sp_generate_merge'' stored procedure'
  SET @output += @b + '--Originally by Vyas (http://vyaskn.tripod.com/code): sp_generate_inserts (build 22)'
  SET @output += @b + '--Adapted for SQL Server 2008+ by Daniel Nolan (https://twitter.com/dnlnln)'
  SET @output += @b + ''
-END
+ END
 
 IF (@include_rowsaffected = 1) -- If the caller has elected not to include the "rows affected" section, let MERGE output the row count as it is executed.
  SET @output += @b + 'SET NOCOUNT ON'
@@ -616,8 +678,13 @@ BEGIN
  SET @output += @b + ') AS [Source] (' + @Column_List + ')'
 END
 ELSE
+ IF @hash_compare_column IS NULL
  BEGIN
   SET @output += @b + 'USING ' + @Source_Table_Qualified + ' AS [Source]';
+ END
+ ELSE
+ BEGIN
+  SET @output += @b + 'USING (SELECT ' + @Column_List + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(@Column_List,'],[','],''|'',[') +')) AS [' + @hash_compare_column  + '] FROM ' + @Source_Table_Qualified + ') AS [Source]'
  END
 
 --Output the join columns ----------------------------------------------------------
@@ -627,7 +694,17 @@ SET @output += @b + 'ON (' + @PK_column_joins + ')'
 --When matched, perform an UPDATE on any metadata columns only (ie. not on PK)------
 IF LEN(@Column_List_For_Update) <> 0
 BEGIN
- SET @output += @b + 'WHEN MATCHED ' + CASE WHEN @update_only_if_changed = 1 THEN 'AND (' + @Column_List_For_Check + ') ' ELSE '' END + 'THEN'
+ --Adding column @hash_compare_column to @ColumnList and @Column_List_For_Update if @hash_compare_column is not null
+ IF @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL AND @SourceHashColumn = 0
+ BEGIN
+	SET @Column_List_For_Update = @Column_List_For_Update + ',' + @b + '  [Target].[' + @hash_compare_column +'] = [Source].[' + @hash_compare_column +']'
+	SET @Column_List = @Column_List + ',[' + @hash_compare_column + ']'
+ END
+ SET @output += @b + 'WHEN MATCHED ' + 
+	 CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL
+	 THEN 'AND ([Target].[' + @hash_compare_column +'] <> [Source].[' + @hash_compare_column +'] OR [Target].[' + @hash_compare_column + '] IS NULL) ' 
+	 ELSE CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NULL THEN
+	 'AND (' + @Column_List_For_Check + ') ' ELSE '' END END + 'THEN'
  SET @output += @b + ' UPDATE SET'
  SET @output += @b + '  ' + LTRIM(@Column_List_For_Update)
 END
@@ -639,13 +716,18 @@ SET @output += @b + ' INSERT(' + @Column_List + ')'
 SET @output += @b + ' VALUES(' + REPLACE(@Column_List, '[', '[Source].[') + ')'
 
 
---When NOT matched by source, DELETE the row
-IF @delete_if_not_matched=1 BEGIN
+--When NOT matched by source, DELETE the row as required
+IF @delete_if_not_matched=1 
+BEGIN
  SET @output += @b + 'WHEN NOT MATCHED BY SOURCE THEN '
- SET @output += @b + ' DELETE'
+ SET @output += @b + ' DELETE;'
+END
+ELSE
+BEGIN
+ SET @output += ';'
 END;
-SET @output += @b + ';'
-SET @output += @b + @batch_separator
+SET @output += @b 
+
 
 --Display the number of affected rows to the user, or report if an error occurred---
 IF @include_rowsaffected = 1
@@ -677,13 +759,14 @@ IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT 
 --Switch-off identity inserting------------------------------------------------------
 IF (LEN(@IDN) <> 0)
  BEGIN
- SET @output +=      'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' OFF'
- SET @output += @b + @batch_separator
  SET @output += @b
+ SET @output += @b +'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' OFF'
+ 	
  END
 
 IF (@include_rowsaffected = 1)
 BEGIN
+ SET @output += @b
  SET @output +=      'SET NOCOUNT OFF'
  SET @output += @b + @batch_separator
  SET @output += @b
