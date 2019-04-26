@@ -281,7 +281,8 @@ DECLARE @Column_ID int,
  @Source_Table_Qualified nvarchar(776),
  @sql nvarchar(max),  --SQL statement that will be executed to check existence of [Hashvalue] column in case @hash_compare_column is used
  @checkhashcolumn nvarchar(128),
- @SourceHashColumn bit = 0
+ @SourceHashColumn bit = 0,
+ @b char(1) = char(13)
 
  IF @hash_compare_column IS NOT NULL  --Check existence of column [Hashvalue] in target table and raise error in case of missing
  BEGIN
@@ -501,8 +502,7 @@ END
  AND c.COLUMN_NAME = @Column_Name_Unquoted 
  )
  BEGIN
-  SET @Column_List_For_Update = @Column_List_For_Update + '[Target].' + @Column_Name + ' = [Source].' + @Column_Name + ', 
-  ' 
+  SET @Column_List_For_Update = @Column_List_For_Update + '[Target].' + @Column_Name + ' = [Source].' + @Column_Name + ', ' + @b + '  '
  SET @Column_List_For_Check = @Column_List_For_Check +
  CASE @Data_Type 
  WHEN 'text' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR '
@@ -527,7 +527,7 @@ END
 --To get rid of the extra characters that got concatenated during the last run through the loop
 IF LEN(@Column_List_For_Update) <> 0
  BEGIN
- SET @Column_List_For_Update = ' ' + LEFT(@Column_List_For_Update,len(@Column_List_For_Update) - 4)
+ SET @Column_List_For_Update = ' ' + LEFT(@Column_List_For_Update,len(@Column_List_For_Update) - 3)
  END
 
 IF LEN(@Column_List_For_Check) <> 0
@@ -594,7 +594,6 @@ SET @Actual_Values =
 
  DECLARE @output NVARCHAR(MAX) 
  SET @output = CASE WHEN @results_to_text = 1 THEN '' ELSE '---' END
- DECLARE @b CHAR(1) = CHAR(13)
 
 --Determining whether to ouput any debug information
 IF @debug_mode =1
