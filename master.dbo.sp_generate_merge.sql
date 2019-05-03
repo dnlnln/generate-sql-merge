@@ -37,10 +37,11 @@ CREATE PROC [sp_generate_merge]
  @ommit_computed_cols bit = 1, -- When 1, computed columns will not be included in the MERGE statement
  @ommit_generated_always_cols bit = 1, -- When 1, GENERATED ALWAYS columns will not be included in the MERGE statement
  @include_use_db bit = 1, -- When 1, includes a USE [DatabaseName] statement at the beginning of the generated batch
- @results_to_text bit = 0, -- When 1, outputs results to grid/messages window. When 0, outputs MERGE statement in an XML fragment.
+ @results_to_text bit = 0, -- When 1, outputs results to grid/messages window. When 0, outputs MERGE statement in an XML fragment. When NULL, only the @output OUTPUT parameter is returned.
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
- @batch_separator nvarchar(50) = 'GO' -- Batch separator to use
+ @batch_separator nvarchar(50) = 'GO', -- Batch separator to use. Specify NULL to output all statements within a single batch
+ @output nvarchar(max) = null output -- Use this output parameter to return the generated T-SQL batches to the caller (Hint: specify @batch_separator=NULL to output all statements within a single batch)
 )
 AS
 BEGIN
@@ -180,6 +181,12 @@ EXEC [DB].dbo.[sp_generate_merge]
 @include_rowsaffected = 0,
 @nologo = 1,
 @cols_to_join_on = "'ID'"
+
+Example 17: To generate and immediately execute a MERGE statement that performs an ETL from a table in one database to another:
+
+DECLARE @sql NVARCHAR(MAX)
+EXEC [AdventureWorks2017].dbo.sp_generate_merge @output = @sql output, @results_to_text = null, @schema = 'Person', @table_name = 'AddressType', @include_values = 0, @include_use_db = 0, @batch_separator = null, @target_table = '[AdventureWorks2017_Target].[Person].[AddressType]'
+EXEC [AdventureWorks2017].dbo.sp_executesql @sql
  
 ***********************************************************************************************************/
 
@@ -592,8 +599,8 @@ SET @Actual_Values =
  ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) = 1 THEN '' '' ELSE '','' END + ''(''+ ' + @Actual_Values + '+'')''' + ' ' + 
  COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ORDER BY ' + @PK_column_list)
 
- DECLARE @output NVARCHAR(MAX) 
- SET @output = CASE WHEN @results_to_text = 1 THEN '' ELSE '---' END
+ SET @output = CASE WHEN ISNULL(@results_to_text, 1) = 1 THEN '' ELSE '---' END
+
 
 --Determining whether to ouput any debug information
 IF @debug_mode =1
@@ -620,7 +627,7 @@ IF (@include_use_db = 1)
  BEGIN
 	SET @output += @b 
 	SET @output += @b + 'USE [' + DB_NAME() + ']'
-	SET @output += @b + @batch_separator
+	SET @output += @b + ISNULL(@batch_separator, '')
 	SET @output += @b 
  END
 
@@ -742,7 +749,7 @@ BEGIN
  SET @output += @b + ' BEGIN'
  SET @output += @b + ' PRINT ''' + @Target_Table_For_Output + ' rows affected by MERGE: '' + CAST(@mergeCount AS VARCHAR(100));';
  SET @output += @b + ' END'
- SET @output += @b + @batch_separator
+ SET @output += @b + ISNULL(@batch_separator, '')
  SET @output += @b + @b
 END
 
@@ -750,7 +757,7 @@ END
 IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT NULL)
  BEGIN
  SET @output +=      'ALTER TABLE ' + @Target_Table_For_Output + ' CHECK CONSTRAINT ALL' --Code to enable the previously disabled constraints
- SET @output += @b + @batch_separator
+ SET @output += @b + ISNULL(@batch_separator, '')
  SET @output += @b
  END
 
@@ -767,7 +774,7 @@ IF (@include_rowsaffected = 1)
 BEGIN
  SET @output += @b
  SET @output +=      'SET NOCOUNT OFF'
- SET @output += @b + @batch_separator
+ SET @output += @b + ISNULL(@batch_separator, '')
  SET @output += @b
 END
 
@@ -779,7 +786,7 @@ BEGIN
 	--output the statement to the Grid/Messages tab
 	SELECT @output;
 END
-ELSE
+ELSE IF @results_to_text = 0
 BEGIN
 	--output the statement as xml (to overcome SSMS 4000/8000 char limitation)
 	SELECT [processing-instruction(x)]=@output FOR XML PATH(''),TYPE;
@@ -788,6 +795,10 @@ BEGIN
 	PRINT ''
 	PRINT 'If you would prefer to have results output directly (without XML) specify @results_to_text = 1, however please'
 	PRINT 'note that the results may be truncated by your SQL client to 4000 nchars.'
+END
+ELSE
+BEGIN
+	PRINT 'MERGE statement generated successfully (refer to @output OUTPUT parameter for generated T-SQL).'
 END
 
 SET NOCOUNT OFF
