@@ -187,6 +187,13 @@ Example 17: To generate and immediately execute a MERGE statement that performs 
 DECLARE @sql NVARCHAR(MAX)
 EXEC [AdventureWorks2017].dbo.sp_generate_merge @output = @sql output, @results_to_text = null, @schema = 'Person', @table_name = 'AddressType', @include_values = 0, @include_use_db = 0, @batch_separator = null, @target_table = '[AdventureWorks2017_Target].[Person].[AddressType]'
 EXEC [AdventureWorks2017].dbo.sp_executesql @sql
+
+Example 18: To generate a MERGE that works with a subset of data from the source table only (e.g. will only INSERT/UPDATE rows that meet certain criteria, and not delete unmatched rows):
+
+SELECT * INTO #CurrencyRateFiltered FROM AdventureWorks2017.Sales.CurrencyRate WHERE ToCurrencyCode = 'AUD';
+ALTER TABLE #CurrencyRateFiltered ADD CONSTRAINT PK_Sales_CurrencyRate PRIMARY KEY CLUSTERED ( CurrencyRateID )
+EXEC tempdb.dbo.sp_generate_merge @table_name='#CurrencyRateFiltered', @target_table='[AdventureWorks2017].[Sales].[CurrencyRate]', @delete_if_not_matched = 0, @include_use_db = 0;
+
  
 ***********************************************************************************************************/
 
@@ -250,12 +257,28 @@ IF (PARSENAME(@table_name,3)) IS NOT NULL
  END
 
 
+DECLARE @Internal_Table_Name NVARCHAR(128)
+IF PARSENAME(@table_name,1) LIKE '#%'
+BEGIN
+	IF DB_NAME() <> 'tempdb'
+	BEGIN
+		RAISERROR('Incorrect database context. The proc must be executed against [tempdb] when a temporary table is specified.',16,1)
+		PRINT 'To resolve, execute the proc in the context of [tempdb], e.g. EXEC tempdb.dbo.sp_generate_merge @table_name=''' + @table_name + ''''
+		RETURN -1 --Failure. Reason: Temporary tables cannot be referenced in a user db
+	END
+	SET @Internal_Table_Name = (SELECT [name] FROM sys.objects WHERE [name] LIKE @table_name + '[_]%')
+END
+ELSE
+BEGIN
+	SET @Internal_Table_Name = @table_name
+END
+
 --Checking for the existence of 'user table' or 'view'
 --This procedure is not written to work on system tables
 --To script the data in system tables, just create a view on the system tables and script the view instead
 IF @schema IS NULL
  BEGIN
- IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @table_name AND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW') AND TABLE_SCHEMA = SCHEMA_NAME())
+ IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @Internal_Table_Name AND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW') AND TABLE_SCHEMA = SCHEMA_NAME())
  BEGIN
  RAISERROR('User table or view not found.',16,1)
  PRINT 'You may see this error if the specified table is not in your default schema (' + SCHEMA_NAME() + '). In that case use @schema parameter to specify the schema name.'
@@ -265,7 +288,7 @@ IF @schema IS NULL
  END
 ELSE
  BEGIN
- IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @table_name AND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW') AND TABLE_SCHEMA = @schema)
+ IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @Internal_Table_Name AND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW') AND TABLE_SCHEMA = @schema)
  BEGIN
  RAISERROR('User table or view not found.',16,1)
  PRINT 'Make sure you have SELECT permission on that table or view.'
@@ -286,6 +309,7 @@ DECLARE @Column_ID int,
  @IDN nvarchar(128), --Will contain the IDENTITY column's name in the table
  @Target_Table_For_Output nvarchar(776),
  @Source_Table_Qualified nvarchar(776),
+ @Source_Table_For_Output nvarchar(776),
  @sql nvarchar(max),  --SQL statement that will be executed to check existence of [Hashvalue] column in case @hash_compare_column is used
  @checkhashcolumn nvarchar(128),
  @SourceHashColumn bit = 0,
@@ -354,12 +378,13 @@ BEGIN
  END
 END
 
-SET @Source_Table_Qualified = QUOTENAME(COALESCE(@schema,SCHEMA_NAME())) + '.' + QUOTENAME(@table_name)
+SET @Source_Table_Qualified = QUOTENAME(COALESCE(@schema,SCHEMA_NAME())) + '.' + QUOTENAME(@Internal_Table_Name)
+SET @Source_Table_For_Output = QUOTENAME(COALESCE(@schema,SCHEMA_NAME())) + '.' + QUOTENAME(@table_name)
 
 --To get the first column's ID
 SELECT @Column_ID = MIN(ORDINAL_POSITION) 
 FROM INFORMATION_SCHEMA.COLUMNS (NOLOCK) 
-WHERE TABLE_NAME = @table_name
+WHERE TABLE_NAME = @Internal_Table_Name
 AND TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
 
 
@@ -371,7 +396,7 @@ WHILE @Column_ID IS NOT NULL
  @Data_Type = DATA_TYPE 
  FROM INFORMATION_SCHEMA.COLUMNS (NOLOCK) 
  WHERE ORDINAL_POSITION = @Column_ID
- AND TABLE_NAME = @table_name
+ AND TABLE_NAME = @Internal_Table_Name
  AND TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
 
 
@@ -500,7 +525,7 @@ END
  SELECT 1
  FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk ,
  INFORMATION_SCHEMA.KEY_COLUMN_USAGE c
- WHERE pk.TABLE_NAME = @table_name
+ WHERE pk.TABLE_NAME = @Internal_Table_Name
  AND pk.TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
  AND CONSTRAINT_TYPE = 'PRIMARY KEY'
  AND c.TABLE_NAME = pk.TABLE_NAME
@@ -524,7 +549,7 @@ END
 
  SELECT @Column_ID = MIN(ORDINAL_POSITION) 
  FROM INFORMATION_SCHEMA.COLUMNS (NOLOCK) 
- WHERE TABLE_NAME = @table_name
+ WHERE TABLE_NAME = @Internal_Table_Name
  AND TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
  AND ORDINAL_POSITION > @Column_ID
 
@@ -564,7 +589,7 @@ BEGIN
 	, @PK_column_joins = @PK_column_joins + '[Target].[' + c.COLUMN_NAME + '] = [Source].[' + c.COLUMN_NAME + '] AND '
 	FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk ,
 	INFORMATION_SCHEMA.KEY_COLUMN_USAGE c
-	WHERE pk.TABLE_NAME = @table_name
+	WHERE pk.TABLE_NAME = @Internal_Table_Name
 	AND pk.TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
 	AND CONSTRAINT_TYPE = 'PRIMARY KEY'
 	AND c.TABLE_NAME = pk.TABLE_NAME
@@ -577,7 +602,7 @@ BEGIN
 	, @PK_column_joins = @PK_column_joins + '[Target].[' + c.COLUMN_NAME + '] = [Source].[' + c.COLUMN_NAME + '] AND '
 	FROM INFORMATION_SCHEMA.COLUMNS AS c
 	WHERE @cols_to_join_on LIKE '%''' + c.COLUMN_NAME + '''%'
-	AND c.TABLE_NAME = @table_name
+	AND c.TABLE_NAME = @Internal_Table_Name
 	AND c.TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
 END
 
@@ -686,11 +711,11 @@ END
 ELSE
  IF @hash_compare_column IS NULL
  BEGIN
-  SET @output += @b + 'USING ' + @Source_Table_Qualified + ' AS [Source]';
+  SET @output += @b + 'USING ' + @Source_Table_For_Output + ' AS [Source]';
  END
  ELSE
  BEGIN
-  SET @output += @b + 'USING (SELECT ' + @Column_List + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(@Column_List,'],[','],''|'',[') +')) AS [' + @hash_compare_column  + '] FROM ' + @Source_Table_Qualified + ') AS [Source]'
+  SET @output += @b + 'USING (SELECT ' + @Column_List + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(@Column_List,'],[','],''|'',[') +')) AS [' + @hash_compare_column  + '] FROM ' + @Source_Table_For_Output + ') AS [Source]'
  END
 
 --Output the join columns ----------------------------------------------------------
