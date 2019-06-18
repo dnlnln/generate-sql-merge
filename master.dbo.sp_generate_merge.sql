@@ -33,7 +33,7 @@ CREATE PROC [sp_generate_merge]
  @update_only_if_changed bit = 1, -- When 1, only performs an UPDATE operation if an included column in a matched row has changed.
  @hash_compare_column nvarchar(128) = NULL, -- When specified, change detection will be based on a SHA2_256 hash of the source data (the hash value will be stored in this @target_table column for later comparison; see Example 16)
  @delete_if_not_matched bit = 1, -- When 1, deletes unmatched source rows from target, when 0 source rows will only be used to update existing rows or insert new.
- @disable_constraints bit = 0, -- When 1, disables foreign key constraints and enables them after the MERGE statement
+ @disable_constraints bit = 0, -- When 1, disables foreign key/check constraints and enables them after the MERGE statement. This effectively postpones checking all constraints to after the MERGE has been performed.
  @ommit_computed_cols bit = 1, -- When 1, computed columns will not be included in the MERGE statement
  @ommit_generated_always_cols bit = 1, -- When 1, GENERATED ALWAYS columns will not be included in the MERGE statement
  @include_use_db bit = 1, -- When 1, includes a USE [DatabaseName] statement at the beginning of the generated batch
@@ -781,7 +781,7 @@ END
 --Re-enable the previously disabled constraints-------------------------------------
 IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT NULL)
  BEGIN
- SET @output +=      'ALTER TABLE ' + @Target_Table_For_Output + ' CHECK CONSTRAINT ALL' --Code to enable the previously disabled constraints
+ SET @output +=      'ALTER TABLE ' + @Target_Table_For_Output + ' WITH CHECK CHECK CONSTRAINT ALL' --Code to enable the previously disabled constraints
  SET @output += @b + ISNULL(@batch_separator, '')
  SET @output += @b
  END
