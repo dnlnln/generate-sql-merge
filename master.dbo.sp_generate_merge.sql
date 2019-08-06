@@ -679,9 +679,9 @@ IF (LEN(@IDN) <> 0)
 
 --Temporarily disable constraints on the target table
 IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT NULL)
- BEGIN
- SET @output += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' NOCHECK CONSTRAINT ALL' --Code to disable constraints temporarily
- END
+BEGIN
+	SET @output += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' NOCHECK CONSTRAINT ALL' --Code to disable constraints temporarily
+END
 
 
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
@@ -780,11 +780,11 @@ END
 
 --Re-enable the previously disabled constraints-------------------------------------
 IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT NULL)
- BEGIN
- SET @output +=      'ALTER TABLE ' + @Target_Table_For_Output + ' CHECK CONSTRAINT ALL' --Code to enable the previously disabled constraints
- SET @output += @b + ISNULL(@batch_separator, '')
- SET @output += @b
- END
+BEGIN
+	SET @output += 'ALTER TABLE ' + @Target_Table_For_Output + ' CHECK CONSTRAINT ALL' --Code to enable the previously disabled constraints
+	SET @output += @b + ISNULL(@batch_separator, '')
+	SET @output += @b
+END
 
 
 --Switch-off identity inserting------------------------------------------------------
