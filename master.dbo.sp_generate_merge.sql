@@ -266,7 +266,7 @@ BEGIN
 		PRINT 'To resolve, execute the proc in the context of [tempdb], e.g. EXEC tempdb.dbo.sp_generate_merge @table_name=''' + @table_name + ''''
 		RETURN -1 --Failure. Reason: Temporary tables cannot be referenced in a user db
 	END
-	SET @Internal_Table_Name = (SELECT [name] FROM sys.objects WHERE [name] LIKE @table_name + '[_]%')
+	SET @Internal_Table_Name = (SELECT [name] FROM sys.objects WHERE [object_id] = OBJECT_ID(@table_name))
 END
 ELSE
 BEGIN
