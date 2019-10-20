@@ -533,6 +533,7 @@ END
  AND c.CONSTRAINT_NAME = pk.CONSTRAINT_NAME
  AND c.COLUMN_NAME = @Column_Name_Unquoted 
  )
+ AND (SELECT COLUMNPROPERTY(OBJECT_ID(@Source_Table_Qualified), @Column_Name_Unquoted, 'IsIdentity')) = 0
  BEGIN
   SET @Column_List_For_Update = @Column_List_For_Update + '[Target].' + @Column_Name + ' = [Source].' + @Column_Name + ', ' + @b + '  '
  SET @Column_List_For_Check = @Column_List_For_Check +
