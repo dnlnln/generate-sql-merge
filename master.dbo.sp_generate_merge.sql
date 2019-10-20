@@ -300,6 +300,7 @@ ELSE
 --Variable declarations
 DECLARE @Column_ID int, 
  @Column_List nvarchar(max), 
+ @Column_List_Insert_Values nvarchar(max),
  @Column_List_For_Update nvarchar(max), 
  @Column_List_For_Check nvarchar(max), 
  @Column_Name nvarchar(128), 
@@ -344,6 +345,7 @@ SET @Column_ID = 0
 SET @Column_Name = ''
 SET @Column_Name_Unquoted = ''
 SET @Column_List = ''
+SET @Column_List_Insert_Values = ''
 SET @Column_List_For_Update = ''
 SET @Column_List_For_Check = ''
 SET @Actual_Values = ''
@@ -520,6 +522,11 @@ END
  THEN ''
  ELSE @Column_Name + ',' END
  
+ SET @Column_List_Insert_Values = @Column_List_Insert_Values +  
+ CASE WHEN @hash_compare_column IS NOT NULL AND @Column_Name = QUOTENAME(@hash_compare_column) THEN ''
+      WHEN @Data_Type IN ('xml') THEN 'CONVERT(xml, ' + @Column_Name + '),'
+ ELSE @Column_Name + ',' END
+
  --Don't update Primary Key or Identity columns
  IF NOT EXISTS(
  SELECT 1
@@ -535,7 +542,11 @@ END
  )
  AND (SELECT COLUMNPROPERTY(OBJECT_ID(@Source_Table_Qualified), @Column_Name_Unquoted, 'IsIdentity')) = 0
  BEGIN
-  SET @Column_List_For_Update = @Column_List_For_Update + '[Target].' + @Column_Name + ' = [Source].' + @Column_Name + ', ' + @b + '  '
+ IF @Data_Type = 'xml'  
+	SET @Column_List_For_Update = @Column_List_For_Update + '[Target].' + @Column_Name + ' = CONVERT(xml, [Source].' + @Column_Name + '), ' + @b + '  '
+ ELSE
+	SET @Column_List_For_Update = @Column_List_For_Update + '[Target].' + @Column_Name + ' = [Source].' + @Column_Name + ', ' + @b + '  '
+
  SET @Column_List_For_Check = @Column_List_For_Check +
  CASE @Data_Type 
  WHEN 'text' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR '
@@ -577,6 +588,7 @@ IF LEN(LTRIM(@Column_List)) = 0
  RETURN -1 --Failure. Reason: Looks like all the columns are ommitted using the @cols_to_exclude parameter
  END
 
+SET @Column_List_Insert_Values = LEFT(@Column_List_Insert_Values,len(@Column_List_Insert_Values) - 1)
 
 --Get the join columns ----------------------------------------------------------
 DECLARE @PK_column_list NVARCHAR(max)
@@ -745,7 +757,7 @@ END
 --When NOT matched by target, perform an INSERT------------------------------------
 SET @output += @b + 'WHEN NOT MATCHED BY TARGET THEN';
 SET @output += @b + ' INSERT(' + @Column_List + ')'
-SET @output += @b + ' VALUES(' + REPLACE(@Column_List, '[', '[Source].[') + ')'
+SET @output += @b + ' VALUES(' + REPLACE(@Column_List_Insert_Values, '[', '[Source].[') + ')'
 
 
 --When NOT matched by source, DELETE the row as required
