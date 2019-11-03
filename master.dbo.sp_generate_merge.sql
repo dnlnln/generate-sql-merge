@@ -41,6 +41,7 @@ CREATE PROC [sp_generate_merge]
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
  @batch_separator nvarchar(50) = 'GO', -- Batch separator to use. Specify NULL to output all statements within a single batch
+ @quiet bit = 0, -- When 1, this proc will not print informational messages and warnings
  @output nvarchar(max) = null output -- Use this output parameter to return the generated T-SQL batches to the caller (Hint: specify @batch_separator=NULL to output all statements within a single batch)
 )
 AS
@@ -437,8 +438,9 @@ END
  BEGIN
  IF (SELECT COLUMNPROPERTY( OBJECT_ID(@Source_Table_Qualified),SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsComputed')) = 1 
  BEGIN
- PRINT 'Warning: The ' + @Column_Name + ' computed column will be excluded from the MERGE statement. Specify @ommit_computed_cols = 0 to include computed columns.'
- GOTO SKIP_LOOP 
+	 IF @quiet = 0
+		PRINT 'Warning: The ' + @Column_Name + ' computed column will be excluded from the MERGE statement. Specify @ommit_computed_cols = 0 to include computed columns.'
+	 GOTO SKIP_LOOP 
  END
  END
 
@@ -446,7 +448,8 @@ END
  IF @ommit_generated_always_cols = 1
  IF ISNULL((SELECT COLUMNPROPERTY( OBJECT_ID(@Source_Table_Qualified),SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'GeneratedAlwaysType')), 0) <> 0
  BEGIN
- PRINT 'Warning: The ' + @Column_Name + ' GENERATED ALWAYS column will be excluded from the MERGE statement. Specify @ommit_generated_always_cols = 0 to include GENERATED ALWAYS columns.'
+	 IF @quiet = 0
+		PRINT 'Warning: The ' + @Column_Name + ' GENERATED ALWAYS column will be excluded from the MERGE statement. Specify @ommit_generated_always_cols = 0 to include GENERATED ALWAYS columns.'
  GOTO SKIP_LOOP 
  END
 
@@ -828,13 +831,16 @@ ELSE IF @results_to_text = 0
 BEGIN
 	--output the statement as xml (to overcome SSMS 4000/8000 char limitation)
 	SELECT [processing-instruction(x)]=@output FOR XML PATH(''),TYPE;
-	PRINT 'MERGE statement has been wrapped in an XML fragment and output successfully.'
-	PRINT 'Ensure you have Results to Grid enabled and then click the hyperlink to copy the statement within the fragment.'
-	PRINT ''
-	PRINT 'If you would prefer to have results output directly (without XML) specify @results_to_text = 1, however please'
-	PRINT 'note that the results may be truncated by your SQL client to 4000 nchars.'
+	IF @quiet = 0
+	BEGIN
+		PRINT 'MERGE statement has been wrapped in an XML fragment and output successfully.'
+		PRINT 'Ensure you have Results to Grid enabled and then click the hyperlink to copy the statement within the fragment.'
+		PRINT ''
+		PRINT 'If you would prefer to have results output directly (without XML) specify @results_to_text = 1, however please'
+		PRINT 'note that the results may be truncated by your SQL client to 4000 nchars.'
+	END
 END
-ELSE
+ELSE IF @quiet = 0
 BEGIN
 	PRINT 'MERGE statement generated successfully (refer to @output OUTPUT parameter for generated T-SQL).'
 END
