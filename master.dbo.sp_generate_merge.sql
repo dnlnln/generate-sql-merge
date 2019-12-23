@@ -531,7 +531,13 @@ END
  AND c.TABLE_NAME = pk.TABLE_NAME
  AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
  AND c.CONSTRAINT_NAME = pk.CONSTRAINT_NAME
- AND c.COLUMN_NAME = @Column_Name_Unquoted 
+ AND c.COLUMN_NAME = @Column_Name_Unquoted
+ UNION
+ SELECT 1
+ FROM sys.identity_columns
+ WHERE OBJECT_SCHEMA_NAME(OBJECT_ID) = COALESCE(@schema, SCHEMA_NAME())
+ AND OBJECT_NAME(object_id) = @Internal_Table_Name
+ AND name = @Column_Name_Unquoted
  )
  BEGIN
   SET @Column_List_For_Update = @Column_List_For_Update + '[Target].' + @Column_Name + ' = [Source].' + @Column_Name + ', ' + @b + '  '
