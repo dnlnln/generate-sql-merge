@@ -694,10 +694,77 @@ IF (LEN(@IDN) <> 0)
 
 
 --Temporarily disable constraints on the target table
-IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT NULL)
- BEGIN
- SET @output += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' NOCHECK CONSTRAINT ALL' --Code to disable constraints temporarily
- END
+DECLARE @output_enable_constraints NVARCHAR(MAX) = ''
+DECLARE @ignore_disable_constraints BIT = IIF((OBJECT_ID(@Source_Table_Qualified, 'U') IS NULL), 1, 0)
+IF @disable_constraints = 1 AND @ignore_disable_constraints = 1
+BEGIN
+	PRINT 'Warning: @disable_constraints=1 will be ignored as the source table does not exist'
+END
+ELSE IF @disable_constraints = 1
+BEGIN
+	DECLARE @Source_Table_Constraints TABLE ([name] SYSNAME PRIMARY KEY, [is_not_trusted] bit, [is_disabled] bit)
+	INSERT INTO @Source_Table_Constraints ([name], [is_not_trusted], [is_disabled])
+	SELECT [name], [is_not_trusted], [is_disabled] FROM sys.check_constraints WHERE parent_object_id = OBJECT_ID(@Source_Table_Qualified, 'U')
+	UNION
+	SELECT [name], [is_not_trusted], [is_disabled] FROM sys.foreign_keys WHERE parent_object_id = OBJECT_ID(@Source_Table_Qualified, 'U')
+
+	DECLARE @Constraint_Ct INT = (SELECT COUNT(1) FROM @Source_Table_Constraints)
+	IF @Constraint_Ct = 0
+	BEGIN
+		PRINT 'Warning: @disable_constraints=1 will be ignored as there are no foreign key or check constraints on the source table'
+		SET @ignore_disable_constraints = 1
+	END
+	ELSE IF ((SELECT COUNT(1) FROM @Source_Table_Constraints WHERE [is_disabled] = 1) = (SELECT COUNT(1) FROM @Source_Table_Constraints))
+	BEGIN
+		PRINT 'Warning: @disable_constraints=1 will be ignored as all foreign key and/or check constraints on the source table are currently disabled'
+		SET @ignore_disable_constraints = 1
+	END
+	ELSE
+	BEGIN
+		DECLARE @All_Constraints_Enabled BIT = IIF((SELECT COUNT(1) FROM @Source_Table_Constraints WHERE [is_disabled] = 0) = @Constraint_Ct, 1, 0)
+		DECLARE @All_Constraints_Trusted BIT = IIF((SELECT COUNT(1) FROM @Source_Table_Constraints WHERE [is_not_trusted] = 0) = @Constraint_Ct, 1, 0)
+		DECLARE @All_Constraints_NotTrusted BIT = IIF((SELECT COUNT(1) FROM @Source_Table_Constraints WHERE [is_not_trusted] = 1) = @Constraint_Ct, 1, 0)
+
+		IF @All_Constraints_Enabled = 1 AND @All_Constraints_Trusted = 1
+		BEGIN
+			SET @output += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' NOCHECK CONSTRAINT ALL' -- Disable constraints temporarily
+			SET @output_enable_constraints += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' WITH CHECK CHECK CONSTRAINT ALL' -- Enable the previously disabled constraints and re-check all data
+		END
+		ELSE IF @All_Constraints_Enabled = 1 AND @All_Constraints_NotTrusted = 1
+		BEGIN
+			SET @output += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' NOCHECK CONSTRAINT ALL' -- Disable constraints temporarily
+			SET @output_enable_constraints += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' CHECK CONSTRAINT ALL' -- Enable the previously disabled constraints, but don't re-check data 
+		END
+		ELSE
+		BEGIN
+			-- Selectively enable/disable constraints, with/without WITH CHECK, on a case-by-case basis
+			WHILE ((SELECT COUNT(1) FROM @Source_Table_Constraints) != 0)
+			BEGIN
+				DECLARE @Constraint_Item_Name SYSNAME = (SELECT TOP 1 [name] FROM @Source_Table_Constraints)
+				DECLARE @Constraint_Item_IsDisabled BIT = (SELECT TOP 1 [is_disabled] FROM @Source_Table_Constraints)
+				DECLARE @Constraint_Item_IsNotTrusted BIT = (SELECT TOP 1 [is_not_trusted] FROM @Source_Table_Constraints)
+
+				IF (@Constraint_Item_IsDisabled = 1)
+				BEGIN
+					DELETE FROM @Source_Table_Constraints WHERE [name] = @Constraint_Item_Name -- Don't enable this previously-disabled constraint
+					CONTINUE;
+				END
+
+				SET @output += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' NOCHECK CONSTRAINT ' + QUOTENAME(@Constraint_Item_Name)
+				IF (@Constraint_Item_IsNotTrusted = 1)
+				BEGIN
+					SET @output_enable_constraints += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' CHECK CONSTRAINT ' + QUOTENAME(@Constraint_Item_Name) -- Enable the previously disabled constraint, but don't re-check data 
+				END
+				ELSE
+				BEGIN
+					SET @output_enable_constraints += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' WITH CHECK CHECK CONSTRAINT ' + QUOTENAME(@Constraint_Item_Name) -- Enable the previously disabled constraint and re-check all data
+				END
+
+				DELETE FROM @Source_Table_Constraints WHERE [name] = @Constraint_Item_Name
+			END
+		END
+	END
+END
 
 
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
@@ -794,13 +861,13 @@ BEGIN
  SET @output += @b + @b
 END
 
---Re-enable the previously disabled constraints-------------------------------------
-IF @disable_constraints = 1 AND (OBJECT_ID(@Source_Table_Qualified, 'U') IS NOT NULL)
- BEGIN
- SET @output +=      'ALTER TABLE ' + @Target_Table_For_Output + ' CHECK CONSTRAINT ALL' --Code to enable the previously disabled constraints
- SET @output += @b + ISNULL(@batch_separator, '')
- SET @output += @b
- END
+--Re-enable the temporarily disabled constraints-------------------------------------
+IF @disable_constraints = 1 AND @ignore_disable_constraints = 0
+BEGIN
+	SET @output += @output_enable_constraints
+	SET @output += @b + ISNULL(@batch_separator, '')
+	SET @output += @b
+END
 
 
 --Switch-off identity inserting------------------------------------------------------
