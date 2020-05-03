@@ -698,7 +698,8 @@ DECLARE @output_enable_constraints NVARCHAR(MAX) = ''
 DECLARE @ignore_disable_constraints BIT = IIF((OBJECT_ID(@Source_Table_Qualified, 'U') IS NULL), 1, 0)
 IF @disable_constraints = 1 AND @ignore_disable_constraints = 1
 BEGIN
-	PRINT 'Warning: @disable_constraints=1 will be ignored as the source table does not exist'
+	IF @quiet = 0
+		PRINT 'Warning: @disable_constraints=1 will be ignored as the source table does not exist'
 END
 ELSE IF @disable_constraints = 1
 BEGIN
@@ -711,12 +712,14 @@ BEGIN
 	DECLARE @Constraint_Ct INT = (SELECT COUNT(1) FROM @Source_Table_Constraints)
 	IF @Constraint_Ct = 0
 	BEGIN
-		PRINT 'Warning: @disable_constraints=1 will be ignored as there are no foreign key or check constraints on the source table'
+		IF @quiet = 0
+			PRINT 'Warning: @disable_constraints=1 will be ignored as there are no foreign key or check constraints on the source table'
 		SET @ignore_disable_constraints = 1
 	END
 	ELSE IF ((SELECT COUNT(1) FROM @Source_Table_Constraints WHERE [is_disabled] = 1) = (SELECT COUNT(1) FROM @Source_Table_Constraints))
 	BEGIN
-		PRINT 'Warning: @disable_constraints=1 will be ignored as all foreign key and/or check constraints on the source table are currently disabled'
+		IF @quiet = 0
+			PRINT 'Warning: @disable_constraints=1 will be ignored as all foreign key and/or check constraints on the source table are currently disabled'
 		SET @ignore_disable_constraints = 1
 	END
 	ELSE
