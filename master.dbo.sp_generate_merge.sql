@@ -599,7 +599,7 @@ END
 ELSE
 BEGIN
 	SELECT @PK_column_list = @PK_column_list + '[' + c.COLUMN_NAME + '], '
-	, @PK_column_joins = @PK_column_joins + '[Target].[' + c.COLUMN_NAME + '] = [Source].[' + c.COLUMN_NAME + '] AND '
+	, @PK_column_joins = @PK_column_joins + '([Target].[' + c.COLUMN_NAME + '] = [Source].[' + c.COLUMN_NAME + ']' + CASE WHEN c.IS_NULLABLE='YES' THEN ' OR ([Target].[' + c.COLUMN_NAME + '] IS NULL AND [Source].[' + c.COLUMN_NAME + '] IS NULL)' ELSE '' END + ') AND '
 	FROM INFORMATION_SCHEMA.COLUMNS AS c
 	WHERE @cols_to_join_on LIKE '%''' + c.COLUMN_NAME + '''%'
 	AND c.TABLE_NAME = @Internal_Table_Name
