@@ -757,7 +757,10 @@ BEGIN
 	END
 END
 
-
+IF @include_rowsaffected = 1
+BEGIN
+ SET @output += @b + 'DECLARE @mergeOutput TABLE ( [DMLAction] VARCHAR(6) );'
+END
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
 SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS [Target]'
 
@@ -825,12 +828,12 @@ SET @output += @b + ' VALUES(' + REPLACE(@Column_List, '[', '[Source].[') + ')'
 IF @delete_if_not_matched=1 
 BEGIN
  SET @output += @b + 'WHEN NOT MATCHED BY SOURCE THEN '
- SET @output += @b + ' DELETE;'
+ SET @output += @b + ' DELETE'
 END
-ELSE
+IF @include_rowsaffected = 1
 BEGIN
- SET @output += ';'
-END;
+ SET @output += @b + 'OUTPUT $action INTO @mergeOutput;'
+END
 SET @output += @b 
 
 
@@ -838,15 +841,15 @@ SET @output += @b
 IF @include_rowsaffected = 1
 BEGIN
  SET @output += @b + 'DECLARE @mergeError int'
- SET @output += @b + ' , @mergeCount int'
- SET @output += @b + 'SELECT @mergeError = @@ERROR, @mergeCount = @@ROWCOUNT'
+ SET @output += @b + ' , @mergeCount int, @mergeCountIns int, @mergeCountUpd int, @mergeCountDel int'
+ SET @output += @b + 'SELECT @mergeError = @@ERROR, @mergeCount = ( SELECT COUNT(1) FROM @mergeOutput ), @mergeCountIns = ( SELECT COUNT(1) FROM @mergeOutput WHERE [DMLAction] = ''INSERT'' ), @mergeCountUpd = ( SELECT COUNT(1) FROM @mergeOutput WHERE [DMLAction] = ''UPDATE'' ), @mergeCountDel = ( SELECT COUNT(1) FROM @mergeOutput WHERE [DMLAction] = ''DELETE'' ) '
  SET @output += @b + 'IF @mergeError != 0'
  SET @output += @b + ' BEGIN'
  SET @output += @b + ' PRINT ''ERROR OCCURRED IN MERGE FOR ' + @Target_Table_For_Output + '. Rows affected: '' + CAST(@mergeCount AS VARCHAR(100)); -- SQL should always return zero rows affected';
  SET @output += @b + ' END'
  SET @output += @b + 'ELSE'
  SET @output += @b + ' BEGIN'
- SET @output += @b + ' PRINT ''' + @Target_Table_For_Output + ' rows affected by MERGE: '' + CAST(@mergeCount AS VARCHAR(100));';
+ SET @output += @b + ' PRINT ''' + @Target_Table_For_Output + ' rows affected by MERGE: '' + CAST(@mergeCount AS VARCHAR(100)) + '' (Inserted: '' + CAST(@mergeCountIns AS VARCHAR(100)) + ''; Updated: '' + CAST(@mergeCountUpd AS VARCHAR(100)) + ''; Deleted: '' + CAST(@mergeCountDel AS VARCHAR(100)) + '')'' ;'
  SET @output += @b + ' END'
  SET @output += @b + ISNULL(@batch_separator, '')
  SET @output += @b + @b
