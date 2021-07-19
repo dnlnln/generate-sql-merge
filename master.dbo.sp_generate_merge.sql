@@ -842,7 +842,8 @@ IF @include_rowsaffected = 1
 BEGIN
  SET @output += @b + 'DECLARE @mergeError int'
  SET @output += @b + ' , @mergeCount int, @mergeCountIns int, @mergeCountUpd int, @mergeCountDel int'
- SET @output += @b + 'SELECT @mergeError = @@ERROR, @mergeCount = ( SELECT COUNT(1) FROM @mergeOutput ), @mergeCountIns = ( SELECT COUNT(1) FROM @mergeOutput WHERE [DMLAction] = ''INSERT'' ), @mergeCountUpd = ( SELECT COUNT(1) FROM @mergeOutput WHERE [DMLAction] = ''UPDATE'' ), @mergeCountDel = ( SELECT COUNT(1) FROM @mergeOutput WHERE [DMLAction] = ''DELETE'' ) '
+ SET @output += @b + 'SELECT @mergeError = @@ERROR'
+ SET @output += @b + 'SELECT @mergeCount = COUNT(1), @mergeCountIns = SUM(IIF([DMLAction] = ''INSERT'', 1, 0)), @mergeCountUpd = SUM(IIF([DMLAction] = ''UPDATE'', 1, 0)), @mergeCountDel = SUM (IIF([DMLAction] = ''DELETE'', 1, 0)) FROM @mergeOutput'
  SET @output += @b + 'IF @mergeError != 0'
  SET @output += @b + ' BEGIN'
  SET @output += @b + ' PRINT ''ERROR OCCURRED IN MERGE FOR ' + @Target_Table_For_Output + '. Rows affected: '' + CAST(@mergeCount AS VARCHAR(100)); -- SQL should always return zero rows affected';
