@@ -541,7 +541,13 @@ END
  AND c.TABLE_NAME = pk.TABLE_NAME
  AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
  AND c.CONSTRAINT_NAME = pk.CONSTRAINT_NAME
- AND c.COLUMN_NAME = @Column_Name_Unquoted 
+ AND c.COLUMN_NAME = @Column_Name_Unquoted
+ UNION
+ SELECT 1
+ FROM sys.identity_columns
+ WHERE OBJECT_SCHEMA_NAME(OBJECT_ID) = COALESCE(@schema, SCHEMA_NAME())
+ AND OBJECT_NAME(object_id) = @Internal_Table_Name
+ AND name = @Column_Name_Unquoted
  )
  AND (SELECT COLUMNPROPERTY(OBJECT_ID(@Source_Table_Qualified), @Column_Name_Unquoted, 'IsIdentity')) = 0
  BEGIN
@@ -554,6 +560,7 @@ END
  CASE @Data_Type 
  WHEN 'text' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR '
  WHEN 'ntext' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
+ WHEN 'xml' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
  WHEN 'geography' THEN CHAR(10) + CHAR(9) + '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geography::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) OR '
  WHEN 'geometry' THEN CHAR(10) + CHAR(9) + '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geometry::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) OR '
  ELSE CHAR(10) + CHAR(9) + 'NULLIF([Source].' + @Column_Name + ', [Target].' + @Column_Name + ') IS NOT NULL OR NULLIF([Target].' + @Column_Name + ', [Source].' + @Column_Name + ') IS NOT NULL OR '
@@ -615,7 +622,7 @@ END
 ELSE
 BEGIN
 	SELECT @PK_column_list = @PK_column_list + '[' + c.COLUMN_NAME + '], '
-	, @PK_column_joins = @PK_column_joins + '[Target].[' + c.COLUMN_NAME + '] = [Source].[' + c.COLUMN_NAME + '] AND '
+	, @PK_column_joins = @PK_column_joins + '([Target].[' + c.COLUMN_NAME + '] = [Source].[' + c.COLUMN_NAME + ']' + CASE WHEN c.IS_NULLABLE='YES' THEN ' OR ([Target].[' + c.COLUMN_NAME + '] IS NULL AND [Source].[' + c.COLUMN_NAME + '] IS NULL)' ELSE '' END + ') AND '
 	FROM INFORMATION_SCHEMA.COLUMNS AS c
 	WHERE @cols_to_join_on LIKE '%''' + c.COLUMN_NAME + '''%'
 	AND c.TABLE_NAME = @Internal_Table_Name
