@@ -850,7 +850,7 @@ BEGIN
  SET @output += @b + ' END'
  SET @output += @b + 'ELSE'
  SET @output += @b + ' BEGIN'
- SET @output += @b + ' PRINT ''' + @Target_Table_For_Output + ' rows affected by MERGE: '' + CAST(@mergeCount AS VARCHAR(100)) + '' (Inserted: '' + CAST(@mergeCountIns AS VARCHAR(100)) + ''; Updated: '' + CAST(@mergeCountUpd AS VARCHAR(100)) + ''; Deleted: '' + CAST(@mergeCountDel AS VARCHAR(100)) + '')'' ;'
+ SET @output += @b + ' PRINT ''' + @Target_Table_For_Output + ' rows affected by MERGE: '' + CAST(COALESCE(@mergeCount,0) AS VARCHAR(100)) + '' (Inserted: '' + CAST(COALESCE(@mergeCountIns,0) AS VARCHAR(100)) + ''; Updated: '' + CAST(COALESCE(@mergeCountUpd,0) AS VARCHAR(100)) + ''; Deleted: '' + CAST(COALESCE(@mergeCountDel,0) AS VARCHAR(100)) + '')'' ;'
  SET @output += @b + ' END'
  SET @output += @b + ISNULL(@batch_separator, '')
  SET @output += @b + @b
