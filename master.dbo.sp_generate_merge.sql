@@ -833,9 +833,9 @@ BEGIN
 END
 IF @include_rowsaffected = 1
 BEGIN
- SET @output += @b + 'OUTPUT $action INTO @mergeOutput;'
+ SET @output += @b + 'OUTPUT $action INTO @mergeOutput'
 END
-SET @output += @b 
+SET @output += ';' + @b
 
 
 --Display the number of affected rows to the user, or report if an error occurred---
