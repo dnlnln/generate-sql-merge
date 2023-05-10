@@ -308,6 +308,7 @@ DECLARE @Column_ID int,
  @Actual_Values nvarchar(max), --This is the string that will be finally executed to generate a MERGE statement
  @IDN nvarchar(128), --Will contain the IDENTITY column's name in the table
  @Target_Table_For_Output nvarchar(776),
+ @Source_Table_Object_Id int,
  @Source_Table_Qualified nvarchar(776),
  @Source_Table_For_Output nvarchar(776),
  @sql nvarchar(max),  --SQL statement that will be executed to check existence of [Hashvalue] column in case @hash_compare_column is used
@@ -380,6 +381,7 @@ END
 
 SET @Source_Table_Qualified = QUOTENAME(COALESCE(@schema,SCHEMA_NAME())) + '.' + QUOTENAME(@Internal_Table_Name)
 SET @Source_Table_For_Output = QUOTENAME(COALESCE(@schema,SCHEMA_NAME())) + '.' + QUOTENAME(@table_name)
+SELECT @Source_Table_Object_Id = OBJECT_ID(@Source_Table_Qualified)
 
 --To get the first column's ID
 SELECT @Column_ID = MIN(ORDINAL_POSITION) 
@@ -422,7 +424,7 @@ END
  END
 
  --Making sure to output SET IDENTITY_INSERT ON/OFF in case the table has an IDENTITY column
- IF (SELECT COLUMNPROPERTY( OBJECT_ID(@Source_Table_Qualified),SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsIdentity')) = 1 
+ IF (SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsIdentity')) = 1 
  BEGIN
  IF @ommit_identity = 0 --Determing whether to include or exclude the IDENTITY column
  SET @IDN = @Column_Name
@@ -433,7 +435,7 @@ END
  --Making sure whether to output computed columns or not
  IF @ommit_computed_cols = 1
  BEGIN
- IF (SELECT COLUMNPROPERTY( OBJECT_ID(@Source_Table_Qualified),SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsComputed')) = 1 
+ IF (SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsComputed')) = 1 
  BEGIN
  PRINT 'Warning: The ' + @Column_Name + ' computed column will be excluded from the MERGE statement. Specify @ommit_computed_cols = 0 to include computed columns.'
  GOTO SKIP_LOOP 
@@ -442,7 +444,7 @@ END
 
  --Skip this column if it is the GENERATED ALWAYS type, unless the user specifically wants those types of columns included
  IF @ommit_generated_always_cols = 1
- IF ISNULL((SELECT COLUMNPROPERTY( OBJECT_ID(@Source_Table_Qualified),SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'GeneratedAlwaysType')), 0) <> 0
+ IF ISNULL((SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'GeneratedAlwaysType')), 0) <> 0
  BEGIN
  PRINT 'Warning: The ' + @Column_Name + ' GENERATED ALWAYS column will be excluded from the MERGE statement. Specify @ommit_generated_always_cols = 0 to include GENERATED ALWAYS columns.'
  GOTO SKIP_LOOP 
@@ -758,9 +760,10 @@ BEGIN
 	END
 END
 
+DECLARE @Merge_Output_Var_Name as NVARCHAR(128) = '@mergeOutput' + CAST(@Source_Table_Object_Id AS VARCHAR)
 IF @include_rowsaffected = 1
 BEGIN
- SET @output += @b + 'DECLARE @mergeOutput TABLE ( [DMLAction] VARCHAR(6) );'
+ SET @output += @b + 'DECLARE ' + @Merge_Output_Var_Name + ' TABLE ( [DMLAction] VARCHAR(6) );'
 END
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
 SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS [Target]'
@@ -833,7 +836,7 @@ BEGIN
 END
 IF @include_rowsaffected = 1
 BEGIN
- SET @output += @b + 'OUTPUT $action INTO @mergeOutput'
+ SET @output += @b + 'OUTPUT $action INTO ' + @Merge_Output_Var_Name
 END
 SET @output += ';' + @b
 
@@ -841,17 +844,27 @@ SET @output += ';' + @b
 --Display the number of affected rows to the user, or report if an error occurred---
 IF @include_rowsaffected = 1
 BEGIN
- SET @output += @b + 'DECLARE @mergeError int'
- SET @output += @b + ' , @mergeCount int, @mergeCountIns int, @mergeCountUpd int, @mergeCountDel int'
- SET @output += @b + 'SELECT @mergeError = @@ERROR'
- SET @output += @b + 'SELECT @mergeCount = COUNT(1), @mergeCountIns = SUM(IIF([DMLAction] = ''INSERT'', 1, 0)), @mergeCountUpd = SUM(IIF([DMLAction] = ''UPDATE'', 1, 0)), @mergeCountDel = SUM (IIF([DMLAction] = ''DELETE'', 1, 0)) FROM @mergeOutput'
- SET @output += @b + 'IF @mergeError != 0'
+ DECLARE @Merge_Error_Var_Name as NVARCHAR(128) = '@mergeError' + CAST(@Source_Table_Object_Id AS VARCHAR)
+ DECLARE @Merge_Count_Var_Name as NVARCHAR(128) = '@mergeCount' + CAST(@Source_Table_Object_Id AS VARCHAR)
+ DECLARE @Merge_CountIns_Var_Name as NVARCHAR(128) = '@mergeCountIns' + CAST(@Source_Table_Object_Id AS VARCHAR)
+ DECLARE @Merge_CountUpd_Var_Name as NVARCHAR(128) = '@mergeCountUpd' + CAST(@Source_Table_Object_Id AS VARCHAR)
+ DECLARE @Merge_CountDel_Var_Name as NVARCHAR(128) = '@mergeCountDel' + CAST(@Source_Table_Object_Id AS VARCHAR)
+
+
+ SET @output += @b + 'DECLARE ' + @Merge_Error_Var_Name + ' int,'
+ SET @output += @b + @Merge_Count_Var_Name + ' int,'
+ SET @output += @b + @Merge_CountIns_Var_Name + ' int,'
+ SET @output += @b + @Merge_CountUpd_Var_Name + ' int,'
+ SET @output += @b + @Merge_CountDel_Var_Name + ' int'
+ SET @output += @b + 'SELECT ' + @Merge_Error_Var_Name + ' = @@ERROR'
+ SET @output += @b + 'SELECT ' + @Merge_Count_Var_Name + ' = COUNT(1), ' + @Merge_CountIns_Var_Name + ' = SUM(IIF([DMLAction] = ''INSERT'', 1, 0)), ' + @Merge_CountUpd_Var_Name + ' = SUM(IIF([DMLAction] = ''UPDATE'', 1, 0)), ' + @Merge_CountDel_Var_Name + ' = SUM (IIF([DMLAction] = ''DELETE'', 1, 0)) FROM ' + @Merge_Output_Var_Name
+ SET @output += @b + 'IF ' + @Merge_Error_Var_Name + ' != 0'
  SET @output += @b + ' BEGIN'
- SET @output += @b + ' PRINT ''ERROR OCCURRED IN MERGE FOR ' + @Target_Table_For_Output + '. Rows affected: '' + CAST(@mergeCount AS VARCHAR(100)); -- SQL should always return zero rows affected';
+ SET @output += @b + ' PRINT ''ERROR OCCURRED IN MERGE FOR ' + @Target_Table_For_Output + '. Rows affected: '' + CAST('+ @Merge_Count_Var_Name + ' AS VARCHAR(100)); -- SQL should always return zero rows affected';
  SET @output += @b + ' END'
  SET @output += @b + 'ELSE'
  SET @output += @b + ' BEGIN'
- SET @output += @b + ' PRINT ''' + @Target_Table_For_Output + ' rows affected by MERGE: '' + CAST(COALESCE(@mergeCount,0) AS VARCHAR(100)) + '' (Inserted: '' + CAST(COALESCE(@mergeCountIns,0) AS VARCHAR(100)) + ''; Updated: '' + CAST(COALESCE(@mergeCountUpd,0) AS VARCHAR(100)) + ''; Deleted: '' + CAST(COALESCE(@mergeCountDel,0) AS VARCHAR(100)) + '')'' ;'
+ SET @output += @b + ' PRINT ''' + @Target_Table_For_Output + ' rows affected by MERGE: '' + CAST(COALESCE(' + @Merge_Count_Var_Name + ',0) AS VARCHAR(100)) + '' (Inserted: '' + CAST(COALESCE(' + @Merge_CountIns_Var_Name + ',0) AS VARCHAR(100)) + ''; Updated: '' + CAST(COALESCE(' + @Merge_CountUpd_Var_Name + ',0) AS VARCHAR(100)) + ''; Deleted: '' + CAST(COALESCE(' + @Merge_CountDel_Var_Name + ',0) AS VARCHAR(100)) + '')'' ;'
  SET @output += @b + ' END'
  SET @output += @b + ISNULL(@batch_separator, '')
  SET @output += @b + @b
