@@ -786,7 +786,7 @@ DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max)
 
 IF @include_values = 1
 BEGIN
- SET @@outputMergeBatch += @b + 'USING ('
+ SET @outputMergeBatch += @b + 'USING ('
  --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
  INSERT INTO @tab (val)
  EXEC (@Actual_Values)
