@@ -265,6 +265,13 @@ IF (PARSENAME(@table_name,3)) IS NOT NULL
 	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch and @delete_if_not_matched properties
  END
 
+ IF @max_rows_per_batch <= 0
+ BEGIN
+	RAISERROR('Invalid use of @max_rows_per_batch',16,1)
+	PRINT 'The @max_rows_per_batch param must be set to 1 or higher.'
+	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch
+ END
+ 
 DECLARE @Internal_Table_Name NVARCHAR(128)
 IF PARSENAME(@table_name,1) LIKE '#%'
 BEGIN
