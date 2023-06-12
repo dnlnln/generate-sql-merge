@@ -41,7 +41,9 @@ CREATE PROC [sp_generate_merge]
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
  @batch_separator nvarchar(50) = 'GO', -- Batch separator to use. Specify NULL to output all statements within a single batch
- @output nvarchar(max) = null output -- Use this output parameter to return the generated T-SQL batches to the caller (Hint: specify @batch_separator=NULL to output all statements within a single batch)
+ @output nvarchar(max) = null output, -- Use this output parameter to return the generated T-SQL batches to the caller (Hint: specify @batch_separator=NULL to output all statements within a single batch)
+ @update_existing bit = 1, -- When 1, performs an UPDATE operation on existing rows.
+ @max_rows_per_batch int = NULL -- When not NULL, splits the MERGE command into multiple batches, each batch merges X rows as specified
 )
 AS
 BEGIN
@@ -256,6 +258,12 @@ IF (PARSENAME(@table_name,3)) IS NOT NULL
  RETURN -1 --Failure. Reason: Database name is specified along with the table name, which is not allowed
  END
 
+ IF @max_rows_per_batch IS NOT NULL AND @delete_if_not_matched = 1
+ BEGIN
+	RAISERROR('Invalid use of @max_rows_per_batch property incombination with @delete_if_not_matched',16,1)
+	PRINT 'The @max_rows_per_batch param is set, however @delete_if_not_matched is set to 1. To utilize batch-based merge, please ensure @delete_if_not_matched is set to 0.'
+	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch and @delete_if_not_matched properties
+ END
 
 DECLARE @Internal_Table_Name NVARCHAR(128)
 IF PARSENAME(@table_name,1) LIKE '#%'
@@ -564,7 +572,7 @@ END
 
 
 --To get rid of the extra characters that got concatenated during the last run through the loop
-IF LEN(@Column_List_For_Update) <> 0
+IF LEN(@Column_List_For_Update) <> 0 AND @update_existing = 1
  BEGIN
  SET @Column_List_For_Update = ' ' + LEFT(@Column_List_For_Update,len(@Column_List_For_Update) - 3)
  END
@@ -762,42 +770,47 @@ IF @include_rowsaffected = 1
 BEGIN
  SET @output += @b + 'DECLARE @mergeOutput TABLE ( [DMLAction] VARCHAR(6) );'
 END
+
+DECLARE @outputMergeBatch nvarchar(max), @ValuesListTotalCount int;
+
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
-SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS [Target]'
+SET @outputMergeBatch = @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS [Target]'
+DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max));
 
 IF @include_values = 1
 BEGIN
- SET @output += @b + 'USING ('
+ SET @@outputMergeBatch += @b + 'USING ('
  --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
- DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max));
  INSERT INTO @tab (val)
  EXEC (@Actual_Values)
 
- IF (SELECT COUNT(*) FROM @tab) <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
+ SET @ValuesListTotalCount = @@ROWCOUNT;
+
+ IF @ValuesListTotalCount <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
  BEGIN
-  SET @output += 'VALUES' + CAST((SELECT @b + val FROM @tab ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'NVARCHAR(MAX)');
+  SET @outputMergeBatch += 'VALUES{{ValuesList}}';
  END
  ELSE
  BEGIN
   -- Mimic an empty result set by returning zero rows from the target table
-  SET @output += 'SELECT ' + @Column_List + ' FROM ' + @Target_Table_For_Output + ' WHERE 1 = 0 -- Empty dataset (source table contained no rows at time of MERGE generation) '
+  SET @outputMergeBatch += 'SELECT ' + @Column_List + ' FROM ' + @Target_Table_For_Output + ' WHERE 1 = 0 -- Empty dataset (source table contained no rows at time of MERGE generation) '
  END
 
- --Output the columns to correspond with each of the values above--------------------
- SET @output += @b + ') AS [Source] (' + @Column_List + ')'
+ --output the columns to correspond with each of the values above--------------------
+ SET @outputMergeBatch += @b + ') AS [Source] (' + @Column_List + ')'
 END
 ELSE
  IF @hash_compare_column IS NULL
  BEGIN
-  SET @output += @b + 'USING ' + @Source_Table_For_Output + ' AS [Source]';
+  SET @outputMergeBatch += @b + 'USING ' + @Source_Table_For_Output + ' AS [Source]';
  END
  ELSE
  BEGIN
-  SET @output += @b + 'USING (SELECT ' + @Column_List + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(@Column_List,'],[','],''|'',[') +')) AS [' + @hash_compare_column  + '] FROM ' + @Source_Table_For_Output + ') AS [Source]'
+  SET @outputMergeBatch += @b + 'USING (SELECT ' + @Column_List + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(@Column_List,'],[','],''|'',[') +')) AS [' + @hash_compare_column  + '] FROM ' + @Source_Table_For_Output + ') AS [Source]'
  END
 
 --Output the join columns ----------------------------------------------------------
-SET @output += @b + 'ON (' + @PK_column_joins + ')'
+SET @outputMergeBatch += @b + 'ON (' + @PK_column_joins + ')'
 
 
 --When matched, perform an UPDATE on any metadata columns only (ie. not on PK)------
@@ -809,33 +822,61 @@ BEGIN
 	SET @Column_List_For_Update = @Column_List_For_Update + ',' + @b + '  [Target].[' + @hash_compare_column +'] = [Source].[' + @hash_compare_column +']'
 	SET @Column_List = @Column_List + ',[' + @hash_compare_column + ']'
  END
- SET @output += @b + 'WHEN MATCHED ' + 
+ SET @outputMergeBatch += @b + 'WHEN MATCHED ' + 
 	 CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL
 	 THEN 'AND ([Target].[' + @hash_compare_column +'] <> [Source].[' + @hash_compare_column +'] OR [Target].[' + @hash_compare_column + '] IS NULL) ' 
 	 ELSE CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NULL THEN
 	 'AND (' + @Column_List_For_Check + ') ' ELSE '' END END + 'THEN'
- SET @output += @b + ' UPDATE SET'
- SET @output += @b + '  ' + LTRIM(@Column_List_For_Update)
+ SET @outputMergeBatch += @b + ' UPDATE SET'
+ SET @outputMergeBatch += @b + '  ' + LTRIM(@Column_List_For_Update)
 END
 
 
 --When NOT matched by target, perform an INSERT------------------------------------
-SET @output += @b + 'WHEN NOT MATCHED BY TARGET THEN';
-SET @output += @b + ' INSERT(' + @Column_List + ')'
-SET @output += @b + ' VALUES(' + REPLACE(@Column_List, '[', '[Source].[') + ')'
+SET @outputMergeBatch += @b + 'WHEN NOT MATCHED BY TARGET THEN';
+SET @outputMergeBatch += @b + ' INSERT(' + @Column_List + ')'
+SET @outputMergeBatch += @b + ' VALUES(' + REPLACE(@Column_List, '[', '[Source].[') + ')'
 
 
 --When NOT matched by source, DELETE the row as required
 IF @delete_if_not_matched=1 
 BEGIN
- SET @output += @b + 'WHEN NOT MATCHED BY SOURCE THEN '
- SET @output += @b + ' DELETE'
+ SET @outputMergeBatch += @b + 'WHEN NOT MATCHED BY SOURCE THEN '
+ SET @outputMergeBatch += @b + ' DELETE'
 END
 IF @include_rowsaffected = 1
 BEGIN
- SET @output += @b + 'OUTPUT $action INTO @mergeOutput'
+ SET @outputMergeBatch += @b + 'OUTPUT $action INTO @mergeOutput'
 END
-SET @output += ';' + @b
+SET @outputMergeBatch += ';' + @b
+
+
+ IF @include_values = 1 AND @ValuesListTotalCount <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
+ BEGIN
+	DECLARE @CurrentValuesList nvarchar(max), @ValuesListIDFrom int, @ValuesListIDTo int;
+	IF @max_rows_per_batch IS NULL SET @max_rows_per_batch = @ValuesListTotalCount;
+
+	SET @ValuesListIDFrom = 1;
+
+	WHILE @ValuesListIDFrom <= @ValuesListTotalCount
+	BEGIN
+		SET @ValuesListIDTo = @ValuesListIDFrom + @max_rows_per_batch - 1
+		SET @CurrentValuesList = ''
+
+		SET @CurrentValuesList += CAST((SELECT @b + CASE WHEN ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) = 1 THEN ' ' ELSE ',' END + val
+									FROM @tab
+									WHERE ID BETWEEN @ValuesListIDFrom AND @ValuesListIDTo
+									ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'NVARCHAR(MAX)');
+		
+		SET @output += REPLACE(@outputMergeBatch, '{{ValuesList}}', @CurrentValuesList) + @b;
+
+		SET @ValuesListIDFrom = @ValuesListIDTo + 1;
+	END
+ END
+ ELSE
+ BEGIN
+	SET @output += @outputMergeBatch;
+ END
 
 
 --Display the number of affected rows to the user, or report if an error occurred---
