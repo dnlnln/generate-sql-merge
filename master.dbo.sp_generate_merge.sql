@@ -870,10 +870,10 @@ SET @outputMergeBatch += ';' + @b
 		SET @ValuesListIDTo = @ValuesListIDFrom + @max_rows_per_batch - 1
 		SET @CurrentValuesList = ''
 
-		SET @CurrentValuesList += CAST((SELECT @b + CASE WHEN ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) = 1 THEN ' ' ELSE ',' END + val
-									FROM @tab
-									WHERE ID BETWEEN @ValuesListIDFrom AND @ValuesListIDTo
-									ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'NVARCHAR(MAX)');
+		SET @CurrentValuesList += CAST((SELECT @b + val
+						FROM @tab
+						WHERE ID BETWEEN @ValuesListIDFrom AND @ValuesListIDTo
+						ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'NVARCHAR(MAX)');
 		
 		SET @output += REPLACE(@outputMergeBatch, '{{ValuesList}}', @CurrentValuesList) + @b;
 
