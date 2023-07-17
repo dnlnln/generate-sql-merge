@@ -644,7 +644,7 @@ SET @Actual_Values =
  'SELECT ' + 
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
  '''' + 
- ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) = 1 THEN '' '' ELSE '','' END + ''(''+ ' + @Actual_Values + '+'')''' + ' ' + 
+ ' '' + ''(''+ ' + @Actual_Values + '+'')''' + ' ' + 
  COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ORDER BY ' + @PK_column_list)
 
  SET @output = CASE WHEN ISNULL(@results_to_text, 1) = 1 THEN '' ELSE '---' END
@@ -870,7 +870,7 @@ SET @outputMergeBatch += ';' + @b
 		SET @ValuesListIDTo = @ValuesListIDFrom + @max_rows_per_batch - 1
 		SET @CurrentValuesList = ''
 
-		SET @CurrentValuesList += CAST((SELECT @b + val
+		SET @CurrentValuesList += CAST((SELECT @b + CASE WHEN ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) = 1 THEN ' ' ELSE ',' END + val
 						FROM @tab
 						WHERE ID BETWEEN @ValuesListIDFrom AND @ValuesListIDTo
 						ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'NVARCHAR(MAX)');
