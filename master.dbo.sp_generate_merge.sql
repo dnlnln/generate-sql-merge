@@ -196,6 +196,9 @@ SELECT * INTO #CurrencyRateFiltered FROM AdventureWorks2017.Sales.CurrencyRate W
 ALTER TABLE #CurrencyRateFiltered ADD CONSTRAINT PK_Sales_CurrencyRate PRIMARY KEY CLUSTERED ( CurrencyRateID )
 EXEC tempdb.dbo.sp_generate_merge @table_name='#CurrencyRateFiltered', @target_table='[AdventureWorks2017].[Sales].[CurrencyRate]', @delete_if_not_matched = 0, @include_use_db = 0;
 
+Example 19: To generate a MERGE split into batches based on a max rowcount per batch. NOTE: @delete_if_not_matched must be 0, and @include_values must be 1.
+
+EXEC [AdventureWorks2017].dbo.[sp_generate_merge] @table_name = 'MyTable', @schema = 'dbo', @delete_if_not_matched = 0, @max_rows_per_batch = 100
  
 ***********************************************************************************************************/
 
@@ -262,6 +265,13 @@ IF (PARSENAME(@table_name,3)) IS NOT NULL
  BEGIN
 	RAISERROR('Invalid use of @max_rows_per_batch property incombination with @delete_if_not_matched',16,1)
 	PRINT 'The @max_rows_per_batch param is set, however @delete_if_not_matched is set to 1. To utilize batch-based merge, please ensure @delete_if_not_matched is set to 0.'
+	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch and @delete_if_not_matched properties
+ END
+
+ IF @max_rows_per_batch IS NOT NULL AND @include_values = 0
+ BEGIN
+	RAISERROR('Invalid use of @max_rows_per_batch property incombination with @include_values',16,1)
+	PRINT 'The @max_rows_per_batch param is set, however @include_values is set to 0. To utilize batch-based merge, please ensure @include_values is set to 1.'
 	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch and @delete_if_not_matched properties
  END
 
