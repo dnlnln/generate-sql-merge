@@ -261,27 +261,27 @@ IF (PARSENAME(@table_name,3)) IS NOT NULL
  RETURN -1 --Failure. Reason: Database name is specified along with the table name, which is not allowed
  END
 
- IF @max_rows_per_batch IS NOT NULL AND @delete_if_not_matched = 1
- BEGIN
+IF @max_rows_per_batch IS NOT NULL AND @delete_if_not_matched = 1
+BEGIN
 	RAISERROR('Invalid use of @max_rows_per_batch property in combination with @delete_if_not_matched',16,1)
 	PRINT 'The @max_rows_per_batch param is set, however @delete_if_not_matched is set to 1. To utilize batch-based merge, please ensure @delete_if_not_matched is set to 0.'
 	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch and @delete_if_not_matched properties
- END
+END
 
- IF @max_rows_per_batch IS NOT NULL AND @include_values = 0
- BEGIN
+IF @max_rows_per_batch IS NOT NULL AND @include_values = 0
+BEGIN
 	RAISERROR('Invalid use of @max_rows_per_batch property in combination with @include_values',16,1)
 	PRINT 'The @max_rows_per_batch param is set, however @include_values is set to 0. To utilize batch-based merge, please ensure @include_values is set to 1.'
 	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch and @include_values properties
- END
+END
 
- IF @max_rows_per_batch <= 0
- BEGIN
+IF @max_rows_per_batch <= 0
+BEGIN
 	RAISERROR('Invalid use of @max_rows_per_batch',16,1)
 	PRINT 'The @max_rows_per_batch param must be set to 1 or higher.'
 	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch
- END
- 
+END
+
 DECLARE @Internal_Table_Name NVARCHAR(128)
 IF PARSENAME(@table_name,1) LIKE '#%'
 BEGIN
@@ -871,8 +871,8 @@ END
 SET @outputMergeBatch += ';' + @b
 
 
- IF @include_values = 1 AND @ValuesListTotalCount <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
- BEGIN
+IF @include_values = 1 AND @ValuesListTotalCount <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
+BEGIN
 	DECLARE @CurrentValuesList nvarchar(max), @ValuesListIDFrom int, @ValuesListIDTo int;
 	IF @max_rows_per_batch IS NULL SET @max_rows_per_batch = @ValuesListTotalCount;
 
@@ -892,11 +892,11 @@ SET @outputMergeBatch += ';' + @b
 
 		SET @ValuesListIDFrom = @ValuesListIDTo + 1;
 	END
- END
- ELSE
- BEGIN
+END
+ELSE
+BEGIN
 	SET @output += @outputMergeBatch;
- END
+END
 
 
 --Display the number of affected rows to the user, or report if an error occurred---
