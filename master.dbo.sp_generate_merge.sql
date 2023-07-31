@@ -655,8 +655,7 @@ SET @PK_column_joins = LEFT(@PK_column_joins, LEN(@PK_column_joins) -4)
 SET @Actual_Values = 
  'SELECT ' + 
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
- '''' + 
- ' '' + ''(''+ ' + @Actual_Values + '+'')''' + ' ' + 
+ ''' ''+''(''+' + @Actual_Values + '+'')''' + 
  COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ORDER BY ' + @PK_column_list)
 
  SET @output = CASE WHEN ISNULL(@results_to_text, 1) = 1 THEN '' ELSE '---' END
