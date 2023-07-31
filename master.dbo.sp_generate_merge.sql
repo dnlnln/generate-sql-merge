@@ -784,7 +784,8 @@ BEGIN
 	END
 END
 
-DECLARE @Merge_Output_Var_Name as NVARCHAR(128) = '@mergeOutput' + CAST(@Source_Table_Object_Id AS VARCHAR)
+DECLARE @Output_Var_Suffix AS NVARCHAR(128) = CASE WHEN @batch_separator IS NULL THEN CAST(@Source_Table_Object_Id AS NVARCHAR(128)) ELSE '' END
+DECLARE @Merge_Output_Var_Name AS NVARCHAR(128) = N'@mergeOutput' + @Output_Var_Suffix
 IF @include_rowsaffected = 1
 BEGIN
  SET @output += @b + 'DECLARE ' + @Merge_Output_Var_Name + ' TABLE ( [DMLAction] VARCHAR(6) );'
@@ -901,11 +902,11 @@ END
 --Display the number of affected rows to the user, or report if an error occurred---
 IF @include_rowsaffected = 1
 BEGIN
- DECLARE @Merge_Error_Var_Name as NVARCHAR(128) = '@mergeError' + CAST(@Source_Table_Object_Id AS VARCHAR)
- DECLARE @Merge_Count_Var_Name as NVARCHAR(128) = '@mergeCount' + CAST(@Source_Table_Object_Id AS VARCHAR)
- DECLARE @Merge_CountIns_Var_Name as NVARCHAR(128) = '@mergeCountIns' + CAST(@Source_Table_Object_Id AS VARCHAR)
- DECLARE @Merge_CountUpd_Var_Name as NVARCHAR(128) = '@mergeCountUpd' + CAST(@Source_Table_Object_Id AS VARCHAR)
- DECLARE @Merge_CountDel_Var_Name as NVARCHAR(128) = '@mergeCountDel' + CAST(@Source_Table_Object_Id AS VARCHAR)
+ DECLARE @Merge_Error_Var_Name AS NVARCHAR(128) = N'@mergeError' + @Output_Var_Suffix
+ DECLARE @Merge_Count_Var_Name AS NVARCHAR(128) = N'@mergeCount' + @Output_Var_Suffix
+ DECLARE @Merge_CountIns_Var_Name AS NVARCHAR(128) = N'@mergeCountIns' + @Output_Var_Suffix
+ DECLARE @Merge_CountUpd_Var_Name AS NVARCHAR(128) = N'@mergeCountUpd' + @Output_Var_Suffix
+ DECLARE @Merge_CountDel_Var_Name AS NVARCHAR(128) = N'@mergeCountDel' + @Output_Var_Suffix
 
 
  SET @output += @b + 'DECLARE ' + @Merge_Error_Var_Name + ' int,'
