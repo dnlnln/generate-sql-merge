@@ -888,7 +888,7 @@ BEGIN
 						WHERE ID BETWEEN @ValuesListIDFrom AND @ValuesListIDTo
 						ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'NVARCHAR(MAX)');
 		
-		SET @output += REPLACE(@outputMergeBatch, '{{ValuesList}}', @CurrentValuesList) + @b;
+		SET @output += REPLACE(@outputMergeBatch, '{{ValuesList}}', @CurrentValuesList);
 
 		SET @ValuesListIDFrom = @ValuesListIDTo + 1;
 	END
