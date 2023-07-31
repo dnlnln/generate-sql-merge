@@ -263,16 +263,16 @@ IF (PARSENAME(@table_name,3)) IS NOT NULL
 
  IF @max_rows_per_batch IS NOT NULL AND @delete_if_not_matched = 1
  BEGIN
-	RAISERROR('Invalid use of @max_rows_per_batch property incombination with @delete_if_not_matched',16,1)
+	RAISERROR('Invalid use of @max_rows_per_batch property in combination with @delete_if_not_matched',16,1)
 	PRINT 'The @max_rows_per_batch param is set, however @delete_if_not_matched is set to 1. To utilize batch-based merge, please ensure @delete_if_not_matched is set to 0.'
 	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch and @delete_if_not_matched properties
  END
 
  IF @max_rows_per_batch IS NOT NULL AND @include_values = 0
  BEGIN
-	RAISERROR('Invalid use of @max_rows_per_batch property incombination with @include_values',16,1)
+	RAISERROR('Invalid use of @max_rows_per_batch property in combination with @include_values',16,1)
 	PRINT 'The @max_rows_per_batch param is set, however @include_values is set to 0. To utilize batch-based merge, please ensure @include_values is set to 1.'
-	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch and @delete_if_not_matched properties
+	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch and @include_values properties
  END
 
  IF @max_rows_per_batch <= 0
