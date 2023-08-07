@@ -41,8 +41,10 @@ CREATE PROC [sp_generate_merge]
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
  @batch_separator nvarchar(50) = 'GO', -- Batch separator to use. Specify NULL to output all statements within a single batch
- @quiet bit = 0, -- When 1, this proc will not print informational messages and warnings
- @output nvarchar(max) = null output -- Use this output parameter to return the generated T-SQL batches to the caller (Hint: specify @batch_separator=NULL to output all statements within a single batch)
+ @output nvarchar(max) = null output, -- Use this output parameter to return the generated T-SQL batches to the caller (Hint: specify @batch_separator=NULL to output all statements within a single batch)
+ @update_existing bit = 1, -- When 1, performs an UPDATE operation on existing rows.
+ @max_rows_per_batch int = NULL, -- When not NULL, splits the MERGE command into multiple batches, each batch merges X rows as specified
+ @quiet bit = 0 -- When 1, this proc will not print informational messages and warnings
 )
 AS
 BEGIN
@@ -52,7 +54,7 @@ Procedure: sp_generate_merge
  (Adapted by Daniel Nolan for SQL Server 2008+)
 
 Adapted from: sp_generate_inserts (Build 22) 
- (Copyright Â© 2002 Narayana Vyas Kondreddi. All rights reserved.)
+ (Copyright © 2002 Narayana Vyas Kondreddi. All rights reserved.)
 
 Purpose: To generate a MERGE statement from existing data, which will INSERT/UPDATE/DELETE data based
  on matching primary key values in the source/target table.
@@ -195,6 +197,9 @@ SELECT * INTO #CurrencyRateFiltered FROM AdventureWorks2017.Sales.CurrencyRate W
 ALTER TABLE #CurrencyRateFiltered ADD CONSTRAINT PK_Sales_CurrencyRate PRIMARY KEY CLUSTERED ( CurrencyRateID )
 EXEC tempdb.dbo.sp_generate_merge @table_name='#CurrencyRateFiltered', @target_table='[AdventureWorks2017].[Sales].[CurrencyRate]', @delete_if_not_matched = 0, @include_use_db = 0;
 
+Example 19: To generate a MERGE split into batches based on a max rowcount per batch. NOTE: @delete_if_not_matched must be 0, and @include_values must be 1.
+
+EXEC [AdventureWorks2017].dbo.[sp_generate_merge] @table_name = 'MyTable', @schema = 'dbo', @delete_if_not_matched = 0, @max_rows_per_batch = 100
  
 ***********************************************************************************************************/
 
@@ -257,6 +262,26 @@ IF (PARSENAME(@table_name,3)) IS NOT NULL
  RETURN -1 --Failure. Reason: Database name is specified along with the table name, which is not allowed
  END
 
+IF @max_rows_per_batch IS NOT NULL AND @delete_if_not_matched = 1
+BEGIN
+	RAISERROR('Invalid use of @max_rows_per_batch property in combination with @delete_if_not_matched',16,1)
+	PRINT 'The @max_rows_per_batch param is set, however @delete_if_not_matched is set to 1. To utilize batch-based merge, please ensure @delete_if_not_matched is set to 0.'
+	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch and @delete_if_not_matched properties
+END
+
+IF @max_rows_per_batch IS NOT NULL AND @include_values = 0
+BEGIN
+	RAISERROR('Invalid use of @max_rows_per_batch property in combination with @include_values',16,1)
+	PRINT 'The @max_rows_per_batch param is set, however @include_values is set to 0. To utilize batch-based merge, please ensure @include_values is set to 1.'
+	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch and @include_values properties
+END
+
+IF @max_rows_per_batch <= 0
+BEGIN
+	RAISERROR('Invalid use of @max_rows_per_batch',16,1)
+	PRINT 'The @max_rows_per_batch param must be set to 1 or higher.'
+	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch
+END
 
 DECLARE @Internal_Table_Name NVARCHAR(128)
 IF PARSENAME(@table_name,1) LIKE '#%'
@@ -310,6 +335,7 @@ DECLARE @Column_ID int,
  @Actual_Values nvarchar(max), --This is the string that will be finally executed to generate a MERGE statement
  @IDN nvarchar(128), --Will contain the IDENTITY column's name in the table
  @Target_Table_For_Output nvarchar(776),
+ @Source_Table_Object_Id int,
  @Source_Table_Qualified nvarchar(776),
  @Source_Table_For_Output nvarchar(776),
  @sql nvarchar(max),  --SQL statement that will be executed to check existence of [Hashvalue] column in case @hash_compare_column is used
@@ -383,6 +409,7 @@ END
 
 SET @Source_Table_Qualified = QUOTENAME(COALESCE(@schema,SCHEMA_NAME())) + '.' + QUOTENAME(@Internal_Table_Name)
 SET @Source_Table_For_Output = QUOTENAME(COALESCE(@schema,SCHEMA_NAME())) + '.' + QUOTENAME(@table_name)
+SELECT @Source_Table_Object_Id = OBJECT_ID(@Source_Table_Qualified)
 
 --To get the first column's ID
 SELECT @Column_ID = MIN(ORDINAL_POSITION) 
@@ -425,7 +452,7 @@ END
  END
 
  --Making sure to output SET IDENTITY_INSERT ON/OFF in case the table has an IDENTITY column
- IF (SELECT COLUMNPROPERTY( OBJECT_ID(@Source_Table_Qualified),SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsIdentity')) = 1 
+ IF (SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsIdentity')) = 1 
  BEGIN
  IF @ommit_identity = 0 --Determing whether to include or exclude the IDENTITY column
  SET @IDN = @Column_Name
@@ -436,7 +463,7 @@ END
  --Making sure whether to output computed columns or not
  IF @ommit_computed_cols = 1
  BEGIN
- IF (SELECT COLUMNPROPERTY( OBJECT_ID(@Source_Table_Qualified),SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsComputed')) = 1 
+ IF (SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsComputed')) = 1 
  BEGIN
 	 IF @quiet = 0
 		PRINT 'Warning: The ' + @Column_Name + ' computed column will be excluded from the MERGE statement. Specify @ommit_computed_cols = 0 to include computed columns.'
@@ -446,7 +473,7 @@ END
 
  --Skip this column if it is the GENERATED ALWAYS type, unless the user specifically wants those types of columns included
  IF @ommit_generated_always_cols = 1
- IF ISNULL((SELECT COLUMNPROPERTY( OBJECT_ID(@Source_Table_Qualified),SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'GeneratedAlwaysType')), 0) <> 0
+ IF ISNULL((SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'GeneratedAlwaysType')), 0) <> 0
  BEGIN
 	 IF @quiet = 0
 		PRINT 'Warning: The ' + @Column_Name + ' GENERATED ALWAYS column will be excluded from the MERGE statement. Specify @ommit_generated_always_cols = 0 to include GENERATED ALWAYS columns.'
@@ -485,7 +512,7 @@ END
  WHEN @Data_Type IN ('varchar','nvarchar') 
  THEN 
  'COALESCE(''N'''''' + REPLACE(' + @Column_Name + ','''''''','''''''''''')+'''''''',''NULL'')'
- WHEN @Data_Type IN ('datetime','smalldatetime','datetime2','date', 'datetimeoffset') 
+ WHEN @Data_Type IN ('datetime','smalldatetime','datetime2','date', 'datetimeoffset', 'time') 
  THEN 
  'COALESCE('''''''' + RTRIM(CONVERT(char,' + @Column_Name + ',127))+'''''''',''NULL'')'
  WHEN @Data_Type IN ('uniqueidentifier') 
@@ -579,7 +606,7 @@ END
 
 
 --To get rid of the extra characters that got concatenated during the last run through the loop
-IF LEN(@Column_List_For_Update) <> 0
+IF LEN(@Column_List_For_Update) <> 0 AND @update_existing = 1
  BEGIN
  SET @Column_List_For_Update = ' ' + LEFT(@Column_List_For_Update,len(@Column_List_For_Update) - 3)
  END
@@ -618,6 +645,7 @@ BEGIN
 	AND c.TABLE_NAME = pk.TABLE_NAME
 	AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
 	AND c.CONSTRAINT_NAME = pk.CONSTRAINT_NAME
+	ORDER BY c.ORDINAL_POSITION
 END
 ELSE
 BEGIN
@@ -643,8 +671,7 @@ SET @PK_column_joins = LEFT(@PK_column_joins, LEN(@PK_column_joins) -4)
 SET @Actual_Values = 
  'SELECT ' + 
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
- '''' + 
- ' '' + CASE WHEN ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) = 1 THEN '' '' ELSE '','' END + ''(''+ ' + @Actual_Values + '+'')''' + ' ' + 
+ '''''+''(''+' + @Actual_Values + '+'')''' + 
  COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ORDER BY ' + @PK_column_list)
 
  SET @output = CASE WHEN ISNULL(@results_to_text, 1) = 1 THEN '' ELSE '---' END
@@ -776,43 +803,53 @@ BEGIN
 	END
 END
 
+DECLARE @Output_Var_Suffix AS NVARCHAR(128) = CASE WHEN @batch_separator IS NULL THEN CAST(@Source_Table_Object_Id AS NVARCHAR(128)) ELSE '' END
+DECLARE @Merge_Output_Var_Name AS NVARCHAR(128) = N'@mergeOutput' + @Output_Var_Suffix
+IF @include_rowsaffected = 1
+BEGIN
+ SET @output += @b + 'DECLARE ' + @Merge_Output_Var_Name + ' TABLE ( [DMLAction] VARCHAR(6) );'
+END
+
+DECLARE @outputMergeBatch nvarchar(max), @ValuesListTotalCount int;
 
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
-SET @output += @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS [Target]'
+SET @outputMergeBatch = @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS [Target]'
+DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max));
 
 IF @include_values = 1
 BEGIN
- SET @output += @b + 'USING ('
+ SET @outputMergeBatch += @b + 'USING ('
  --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
- DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max));
  INSERT INTO @tab (val)
  EXEC (@Actual_Values)
 
- IF (SELECT COUNT(*) FROM @tab) <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
+ SET @ValuesListTotalCount = @@ROWCOUNT;
+
+ IF @ValuesListTotalCount <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
  BEGIN
-  SET @output += 'VALUES' + CAST((SELECT @b + val FROM @tab ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'NVARCHAR(MAX)');
+  SET @outputMergeBatch += 'VALUES{{ValuesList}}';
  END
  ELSE
  BEGIN
   -- Mimic an empty result set by returning zero rows from the target table
-  SET @output += 'SELECT ' + @Column_List + ' FROM ' + @Target_Table_For_Output + ' WHERE 1 = 0 -- Empty dataset (source table contained no rows at time of MERGE generation) '
+  SET @outputMergeBatch += 'SELECT ' + @Column_List + ' FROM ' + @Target_Table_For_Output + ' WHERE 1 = 0 -- Empty dataset (source table contained no rows at time of MERGE generation) '
  END
 
- --Output the columns to correspond with each of the values above--------------------
- SET @output += @b + ') AS [Source] (' + @Column_List + ')'
+ --output the columns to correspond with each of the values above--------------------
+ SET @outputMergeBatch += @b + ') AS [Source] (' + @Column_List + ')'
 END
 ELSE
  IF @hash_compare_column IS NULL
  BEGIN
-  SET @output += @b + 'USING ' + @Source_Table_For_Output + ' AS [Source]';
+  SET @outputMergeBatch += @b + 'USING ' + @Source_Table_For_Output + ' AS [Source]';
  END
  ELSE
  BEGIN
-  SET @output += @b + 'USING (SELECT ' + @Column_List + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(@Column_List,'],[','],''|'',[') +')) AS [' + @hash_compare_column  + '] FROM ' + @Source_Table_For_Output + ') AS [Source]'
+  SET @outputMergeBatch += @b + 'USING (SELECT ' + @Column_List + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(@Column_List,'],[','],''|'',[') +')) AS [' + @hash_compare_column  + '] FROM ' + @Source_Table_For_Output + ') AS [Source]'
  END
 
 --Output the join columns ----------------------------------------------------------
-SET @output += @b + 'ON (' + @PK_column_joins + ')'
+SET @outputMergeBatch += @b + 'ON (' + @PK_column_joins + ')'
 
 
 --When matched, perform an UPDATE on any metadata columns only (ie. not on PK)------
@@ -824,48 +861,87 @@ BEGIN
 	SET @Column_List_For_Update = @Column_List_For_Update + ',' + @b + '  [Target].[' + @hash_compare_column +'] = [Source].[' + @hash_compare_column +']'
 	SET @Column_List = @Column_List + ',[' + @hash_compare_column + ']'
  END
- SET @output += @b + 'WHEN MATCHED ' + 
+ SET @outputMergeBatch += @b + 'WHEN MATCHED ' + 
 	 CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL
 	 THEN 'AND ([Target].[' + @hash_compare_column +'] <> [Source].[' + @hash_compare_column +'] OR [Target].[' + @hash_compare_column + '] IS NULL) ' 
 	 ELSE CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NULL THEN
 	 'AND (' + @Column_List_For_Check + ') ' ELSE '' END END + 'THEN'
- SET @output += @b + ' UPDATE SET'
- SET @output += @b + '  ' + LTRIM(@Column_List_For_Update)
+ SET @outputMergeBatch += @b + ' UPDATE SET'
+ SET @outputMergeBatch += @b + '  ' + LTRIM(@Column_List_For_Update)
 END
 
 
 --When NOT matched by target, perform an INSERT------------------------------------
-SET @output += @b + 'WHEN NOT MATCHED BY TARGET THEN';
-SET @output += @b + ' INSERT(' + @Column_List + ')'
-SET @output += @b + ' VALUES(' + REPLACE(@Column_List_Insert_Values, '[', '[Source].[') + ')'
+SET @outputMergeBatch += @b + 'WHEN NOT MATCHED BY TARGET THEN';
+SET @outputMergeBatch += @b + ' INSERT(' + @Column_List + ')'
+SET @outputMergeBatch += @b + ' VALUES(' + REPLACE(@Column_List_Insert_Values, '[', '[Source].[') + ')'
 
 
 --When NOT matched by source, DELETE the row as required
 IF @delete_if_not_matched=1 
 BEGIN
- SET @output += @b + 'WHEN NOT MATCHED BY SOURCE THEN '
- SET @output += @b + ' DELETE;'
+ SET @outputMergeBatch += @b + 'WHEN NOT MATCHED BY SOURCE THEN '
+ SET @outputMergeBatch += @b + ' DELETE'
+END
+IF @include_rowsaffected = 1
+BEGIN
+ SET @outputMergeBatch += @b + 'OUTPUT $action INTO ' + @Merge_Output_Var_Name
+END
+SET @outputMergeBatch += ';' + @b
+
+
+IF @include_values = 1 AND @ValuesListTotalCount <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
+BEGIN
+	DECLARE @CurrentValuesList nvarchar(max), @ValuesListIDFrom int, @ValuesListIDTo int;
+	IF @max_rows_per_batch IS NULL SET @max_rows_per_batch = @ValuesListTotalCount;
+
+	SET @ValuesListIDFrom = 1;
+
+	WHILE @ValuesListIDFrom <= @ValuesListTotalCount
+	BEGIN
+		SET @ValuesListIDTo = @ValuesListIDFrom + @max_rows_per_batch - 1
+		SET @CurrentValuesList = ''
+
+		SET @CurrentValuesList += CAST((SELECT @b + CASE WHEN ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) = 1 THEN '  ' ELSE ' ,' END + val
+						FROM @tab
+						WHERE ID BETWEEN @ValuesListIDFrom AND @ValuesListIDTo
+						ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'NVARCHAR(MAX)');
+		
+		SET @output += REPLACE(@outputMergeBatch, '{{ValuesList}}', @CurrentValuesList);
+
+		SET @ValuesListIDFrom = @ValuesListIDTo + 1;
+	END
 END
 ELSE
 BEGIN
- SET @output += ';'
-END;
-SET @output += @b 
+	SET @output += @outputMergeBatch;
+END
 
 
 --Display the number of affected rows to the user, or report if an error occurred---
 IF @include_rowsaffected = 1
 BEGIN
- SET @output += @b + 'DECLARE @mergeError int'
- SET @output += @b + ' , @mergeCount int'
- SET @output += @b + 'SELECT @mergeError = @@ERROR, @mergeCount = @@ROWCOUNT'
- SET @output += @b + 'IF @mergeError != 0'
+ DECLARE @Merge_Error_Var_Name AS NVARCHAR(128) = N'@mergeError' + @Output_Var_Suffix
+ DECLARE @Merge_Count_Var_Name AS NVARCHAR(128) = N'@mergeCount' + @Output_Var_Suffix
+ DECLARE @Merge_CountIns_Var_Name AS NVARCHAR(128) = N'@mergeCountIns' + @Output_Var_Suffix
+ DECLARE @Merge_CountUpd_Var_Name AS NVARCHAR(128) = N'@mergeCountUpd' + @Output_Var_Suffix
+ DECLARE @Merge_CountDel_Var_Name AS NVARCHAR(128) = N'@mergeCountDel' + @Output_Var_Suffix
+
+
+ SET @output += @b + 'DECLARE ' + @Merge_Error_Var_Name + ' int,'
+ SET @output += @b + @Merge_Count_Var_Name + ' int,'
+ SET @output += @b + @Merge_CountIns_Var_Name + ' int,'
+ SET @output += @b + @Merge_CountUpd_Var_Name + ' int,'
+ SET @output += @b + @Merge_CountDel_Var_Name + ' int'
+ SET @output += @b + 'SELECT ' + @Merge_Error_Var_Name + ' = @@ERROR'
+ SET @output += @b + 'SELECT ' + @Merge_Count_Var_Name + ' = COUNT(1), ' + @Merge_CountIns_Var_Name + ' = SUM(IIF([DMLAction] = ''INSERT'', 1, 0)), ' + @Merge_CountUpd_Var_Name + ' = SUM(IIF([DMLAction] = ''UPDATE'', 1, 0)), ' + @Merge_CountDel_Var_Name + ' = SUM (IIF([DMLAction] = ''DELETE'', 1, 0)) FROM ' + @Merge_Output_Var_Name
+ SET @output += @b + 'IF ' + @Merge_Error_Var_Name + ' != 0'
  SET @output += @b + ' BEGIN'
- SET @output += @b + ' PRINT ''ERROR OCCURRED IN MERGE FOR ' + @Target_Table_For_Output + '. Rows affected: '' + CAST(@mergeCount AS VARCHAR(100)); -- SQL should always return zero rows affected';
+ SET @output += @b + ' PRINT ''ERROR OCCURRED IN MERGE FOR ' + @Target_Table_For_Output + '. Rows affected: '' + CAST('+ @Merge_Count_Var_Name + ' AS VARCHAR(100)); -- SQL should always return zero rows affected';
  SET @output += @b + ' END'
  SET @output += @b + 'ELSE'
  SET @output += @b + ' BEGIN'
- SET @output += @b + ' PRINT ''' + @Target_Table_For_Output + ' rows affected by MERGE: '' + CAST(@mergeCount AS VARCHAR(100));';
+ SET @output += @b + ' PRINT ''' + @Target_Table_For_Output + ' rows affected by MERGE: '' + CAST(COALESCE(' + @Merge_Count_Var_Name + ',0) AS VARCHAR(100)) + '' (Inserted: '' + CAST(COALESCE(' + @Merge_CountIns_Var_Name + ',0) AS VARCHAR(100)) + ''; Updated: '' + CAST(COALESCE(' + @Merge_CountUpd_Var_Name + ',0) AS VARCHAR(100)) + ''; Deleted: '' + CAST(COALESCE(' + @Merge_CountDel_Var_Name + ',0) AS VARCHAR(100)) + '')'' ;'
  SET @output += @b + ' END'
  SET @output += @b + ISNULL(@batch_separator, '')
  SET @output += @b + @b
