@@ -54,7 +54,7 @@ Procedure: sp_generate_merge
  (Adapted by Daniel Nolan for SQL Server 2008+)
 
 Adapted from: sp_generate_inserts (Build 22) 
- (Copyright © 2002 Narayana Vyas Kondreddi. All rights reserved.)
+ (Copyright Â© 2002 Narayana Vyas Kondreddi. All rights reserved.)
 
 Purpose: To generate a MERGE statement from existing data, which will INSERT/UPDATE/DELETE data based
  on matching primary key values in the source/target table.
@@ -215,7 +215,7 @@ IF ((@cols_to_include IS NOT NULL) AND (@cols_to_exclude IS NOT NULL))
 
 
 --Making sure the @cols_to_include, @cols_to_exclude and @cols_to_join_on parameters are receiving values in proper format
-IF ((@cols_to_include IS NOT NULL) AND (PATINDEX('''%''',@cols_to_include) = 0))
+IF ((@cols_to_include IS NOT NULL) AND (PATINDEX('''%''',@cols_to_include COLLATE DATABASE_DEFAULT) = 0))
  BEGIN
  RAISERROR('Invalid use of @cols_to_include property',16,1)
  PRINT 'Specify column names surrounded by single quotes and separated by commas'
@@ -223,7 +223,7 @@ IF ((@cols_to_include IS NOT NULL) AND (PATINDEX('''%''',@cols_to_include) = 0))
  RETURN -1 --Failure. Reason: Invalid use of @cols_to_include property
  END
 
-IF ((@cols_to_exclude IS NOT NULL) AND (PATINDEX('''%''',@cols_to_exclude) = 0))
+IF ((@cols_to_exclude IS NOT NULL) AND (PATINDEX('''%''',@cols_to_exclude COLLATE DATABASE_DEFAULT) = 0))
  BEGIN
  RAISERROR('Invalid use of @cols_to_exclude property',16,1)
  PRINT 'Specify column names surrounded by single quotes and separated by commas'
@@ -231,7 +231,7 @@ IF ((@cols_to_exclude IS NOT NULL) AND (PATINDEX('''%''',@cols_to_exclude) = 0))
  RETURN -1 --Failure. Reason: Invalid use of @cols_to_exclude property
  END
 
-IF ((@cols_to_join_on IS NOT NULL) AND (PATINDEX('''%''',@cols_to_join_on) = 0))
+IF ((@cols_to_join_on IS NOT NULL) AND (PATINDEX('''%''',@cols_to_join_on COLLATE DATABASE_DEFAULT) = 0))
  BEGIN
  RAISERROR('Invalid use of @cols_to_join_on property',16,1)
  PRINT 'Specify column names surrounded by single quotes and separated by commas'
@@ -284,19 +284,19 @@ BEGIN
 END
 
 DECLARE @Internal_Table_Name NVARCHAR(128)
-IF PARSENAME(@table_name,1) LIKE '#%'
+IF PARSENAME(@table_name,1) LIKE '#%' COLLATE DATABASE_DEFAULT
 BEGIN
 	IF DB_NAME() <> 'tempdb'
 	BEGIN
 		RAISERROR('Incorrect database context. The proc must be executed against [tempdb] when a temporary table is specified.',16,1)
-		PRINT 'To resolve, execute the proc in the context of [tempdb], e.g. EXEC tempdb.dbo.sp_generate_merge @table_name=''' + @table_name + ''''
+		PRINT 'To resolve, execute the proc in the context of [tempdb], e.g. EXEC tempdb.dbo.sp_generate_merge @table_name=''' + @table_name COLLATE DATABASE_DEFAULT + ''''
 		RETURN -1 --Failure. Reason: Temporary tables cannot be referenced in a user db
 	END
-	SET @Internal_Table_Name = (SELECT [name] FROM sys.objects WHERE [object_id] = OBJECT_ID(@table_name))
+	SET @Internal_Table_Name = (SELECT [name] FROM sys.objects WHERE [object_id] = OBJECT_ID(@table_name COLLATE DATABASE_DEFAULT))
 END
 ELSE
 BEGIN
-	SET @Internal_Table_Name = @table_name
+	SET @Internal_Table_Name = @table_name COLLATE DATABASE_DEFAULT
 END
 
 --Checking for the existence of 'user table' or 'view'
@@ -304,7 +304,7 @@ END
 --To script the data in system tables, just create a view on the system tables and script the view instead
 IF @schema IS NULL
  BEGIN
- IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @Internal_Table_Name AND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW') AND TABLE_SCHEMA = SCHEMA_NAME())
+ IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT AND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW') AND TABLE_SCHEMA = SCHEMA_NAME())
  BEGIN
  RAISERROR('User table or view not found.',16,1)
  PRINT 'You may see this error if the specified table is not in your default schema (' + SCHEMA_NAME() + '). In that case use @schema parameter to specify the schema name.'
@@ -314,7 +314,7 @@ IF @schema IS NULL
  END
 ELSE
  BEGIN
- IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @Internal_Table_Name AND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW') AND TABLE_SCHEMA = @schema)
+ IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT AND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW') AND TABLE_SCHEMA = @schema COLLATE DATABASE_DEFAULT)
  BEGIN
  RAISERROR('User table or view not found.',16,1)
  PRINT 'Make sure you have SELECT permission on that table or view.'
@@ -347,19 +347,19 @@ DECLARE @Column_ID int,
  BEGIN
  IF @target_table IS NULL
  BEGIN
-	SET @target_table = @table_name
+	SET @target_table = @table_name COLLATE DATABASE_DEFAULT
  END		
  SET @SQL =
 	'SELECT @columnname = column_name
-	FROM ' + COALESCE(PARSENAME(@target_table,3),DB_NAME()) + '.INFORMATION_SCHEMA.COLUMNS (NOLOCK)
-	WHERE TABLE_NAME = ''' + PARSENAME(@target_table,1) + '''' +
-	' AND TABLE_SCHEMA = ' + '''' + COALESCE(@schema, SCHEMA_NAME()) + '''' + ' AND [COLUMN_NAME] = ''' + @hash_compare_column + ''''
+	FROM ' + COALESCE(PARSENAME(@target_table COLLATE DATABASE_DEFAULT,3),DB_NAME()) + '.INFORMATION_SCHEMA.COLUMNS (NOLOCK)
+	WHERE TABLE_NAME = ''' + PARSENAME(@target_table COLLATE DATABASE_DEFAULT,1) + '''' +
+	' AND TABLE_SCHEMA = ' + '''' + COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME()) + '''' + ' AND [COLUMN_NAME] = ''' + @hash_compare_column COLLATE DATABASE_DEFAULT + ''''
 
 	EXECUTE sp_executesql @sql, N'@columnname nvarchar(128) OUTPUT', @columnname = @checkhashcolumn OUTPUT
 	IF @checkhashcolumn IS NULL
 	BEGIN
 	  RAISERROR('Column %s not found ',16,1, @hash_compare_column)
-	  PRINT 'The specified @hash_compare_column [' + @hash_compare_column +  '] does not exist in ' + QUOTENAME(@target_table) + '. Please make sure that [' + @hash_compare_column + '] VARBINARY (8000) exits in the target table'
+	  PRINT 'The specified @hash_compare_column [' + @hash_compare_column COLLATE DATABASE_DEFAULT +  '] does not exist in ' + QUOTENAME(@target_table COLLATE DATABASE_DEFAULT) + '. Please make sure that [' + @hash_compare_column COLLATE DATABASE_DEFAULT + '] VARBINARY (8000) exits in the target table'
 	  RETURN -1 --Failure. Reason: There is no column that can be used as the basis of Hashcompare
 	END	
 
@@ -378,44 +378,44 @@ SET @Column_List_For_Check = ''
 SET @Actual_Values = ''
 
 --Variable Defaults
-IF @target_table IS NOT NULL AND (@target_table LIKE '%.%' OR @target_table LIKE '\[%\]' ESCAPE '\')
+IF @target_table IS NOT NULL AND (@target_table LIKE '%.%' COLLATE DATABASE_DEFAULT OR @target_table LIKE '\[%\]'  COLLATE DATABASE_DEFAULT ESCAPE '\')
 BEGIN
- IF NOT @target_table LIKE '\[%\]' ESCAPE '\'
+ IF NOT @target_table LIKE '\[%\]' COLLATE DATABASE_DEFAULT ESCAPE '\'
  BEGIN
   RAISERROR('Ambiguous value for @target_table specified. Use QUOTENAME() to ensure the identifer is fully qualified (e.g. [dbo].[Titles] or [OtherDb].[dbo].[Titles]).',16,1)
   RETURN -1 --Failure. Reason: The value could be a multi-part object identifier or it could be a single-part object identifier that just happens to include a period character
  END
 
  -- If the user has specified the @schema param, but the qualified @target_table they've specified does not include the target schema, then fail validation to avoid any ambiguity
- IF @schema IS NOT NULL AND @target_table NOT LIKE '%.%'
+ IF @schema IS NOT NULL AND @target_table NOT LIKE '%.%' COLLATE DATABASE_DEFAULT
  BEGIN
   RAISERROR('The specified @target_table is missing a schema name (e.g. [dbo].[Titles]).',16,1)
   RETURN -1 --Failure. Reason: Omitting the schema in this scenario is likely a mistake
  END
 
-  SET @Target_Table_For_Output = @target_table 
+  SET @Target_Table_For_Output = @target_table COLLATE DATABASE_DEFAULT
  END
  ELSE
  BEGIN
  IF @schema IS NULL
  BEGIN
-  SET @Target_Table_For_Output = QUOTENAME(COALESCE(@target_table, @table_name))
+  SET @Target_Table_For_Output = QUOTENAME(COALESCE(@target_table COLLATE DATABASE_DEFAULT, @table_name COLLATE DATABASE_DEFAULT))
  END
  ELSE
  BEGIN
-  SET @Target_Table_For_Output = QUOTENAME(@schema) + '.' + QUOTENAME(COALESCE(@target_table, @table_name))
+  SET @Target_Table_For_Output = QUOTENAME(@schema COLLATE DATABASE_DEFAULT) + '.' + QUOTENAME(COALESCE(@target_table COLLATE DATABASE_DEFAULT, @table_name COLLATE DATABASE_DEFAULT))
  END
 END
 
-SET @Source_Table_Qualified = QUOTENAME(COALESCE(@schema,SCHEMA_NAME())) + '.' + QUOTENAME(@Internal_Table_Name)
-SET @Source_Table_For_Output = QUOTENAME(COALESCE(@schema,SCHEMA_NAME())) + '.' + QUOTENAME(@table_name)
+SET @Source_Table_Qualified = QUOTENAME(COALESCE(@schema COLLATE DATABASE_DEFAULT,SCHEMA_NAME())) + '.' + QUOTENAME(@Internal_Table_Name COLLATE DATABASE_DEFAULT)
+SET @Source_Table_For_Output = QUOTENAME(COALESCE(@schema COLLATE DATABASE_DEFAULT,SCHEMA_NAME())) + '.' + QUOTENAME(@table_name COLLATE DATABASE_DEFAULT)
 SELECT @Source_Table_Object_Id = OBJECT_ID(@Source_Table_Qualified)
 
 --To get the first column's ID
 SELECT @Column_ID = MIN(ORDINAL_POSITION) 
 FROM INFORMATION_SCHEMA.COLUMNS (NOLOCK) 
 WHERE TABLE_NAME = @Internal_Table_Name
-AND TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
+AND TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
 
 
 --Loop through all the columns of the table, to get the column names and their data types
@@ -426,18 +426,18 @@ WHILE @Column_ID IS NOT NULL
  @Data_Type = DATA_TYPE 
  FROM INFORMATION_SCHEMA.COLUMNS (NOLOCK) 
  WHERE ORDINAL_POSITION = @Column_ID
- AND TABLE_NAME = @Internal_Table_Name
- AND TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
+ AND TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
+ AND TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
 
 
-IF @Data_Type IN ('timestamp','rowversion') --SQL Server doesn't allow Timestamp/Rowversion column updates
+IF @Data_Type COLLATE DATABASE_DEFAULT IN ('timestamp','rowversion') --SQL Server doesn't allow Timestamp/Rowversion column updates
 BEGIN
 	GOTO SKIP_LOOP
 END
 
  IF @cols_to_include IS NOT NULL --Selecting only user specified columns
  BEGIN
- IF CHARINDEX( '''' + SUBSTRING(@Column_Name,2,LEN(@Column_Name)-2) + '''',@cols_to_include) = 0 
+ IF CHARINDEX( '''' + SUBSTRING(@Column_Name COLLATE DATABASE_DEFAULT,2,LEN(@Column_Name COLLATE DATABASE_DEFAULT)-2) + '''',@cols_to_include COLLATE DATABASE_DEFAULT) = 0 
  BEGIN
  GOTO SKIP_LOOP
  END
@@ -445,7 +445,7 @@ END
 
  IF @cols_to_exclude IS NOT NULL --Selecting only user specified columns
  BEGIN
- IF CHARINDEX( '''' + SUBSTRING(@Column_Name,2,LEN(@Column_Name)-2) + '''',@cols_to_exclude) <> 0 
+ IF CHARINDEX( '''' + SUBSTRING(@Column_Name COLLATE DATABASE_DEFAULT,2,LEN(@Column_Name COLLATE DATABASE_DEFAULT)-2) + '''',@cols_to_exclude COLLATE DATABASE_DEFAULT) <> 0 
  BEGIN
  GOTO SKIP_LOOP
  END
@@ -455,7 +455,7 @@ END
  IF (SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsIdentity')) = 1 
  BEGIN
  IF @ommit_identity = 0 --Determing whether to include or exclude the IDENTITY column
- SET @IDN = @Column_Name
+ SET @IDN = @Column_Name COLLATE DATABASE_DEFAULT
  ELSE
  GOTO SKIP_LOOP 
  END
@@ -481,13 +481,13 @@ END
  END
 
  --make sure if source table already contains @hash_compare_column to avoid being doubled in UPDATE clause
- IF  @hash_compare_column IS NOT NULL AND @Column_Name = QUOTENAME(@hash_compare_column)
+ IF  @hash_compare_column IS NOT NULL AND @Column_Name = QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
  BEGIN
 	SET @SourceHashColumn = 1
  END
  
  --Tables with columns of IMAGE data type are not supported for obvious reasons
- IF(@Data_Type in ('image'))
+ IF(@Data_Type COLLATE DATABASE_DEFAULT in ('image'))
  BEGIN
  IF (@ommit_images = 0)
  BEGIN
@@ -506,40 +506,40 @@ END
  --making sure, not to lose any data from flot, real, money, smallmomey, datetime columns
  SET @Actual_Values = @Actual_Values +
  CASE 
- WHEN @Data_Type IN ('char','nchar') 
+ WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('char','nchar') 
  THEN 
  'COALESCE(''N'''''' + REPLACE(RTRIM(' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')'
- WHEN @Data_Type IN ('varchar','nvarchar') 
+ WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('varchar','nvarchar') 
  THEN 
  'COALESCE(''N'''''' + REPLACE(' + @Column_Name + ','''''''','''''''''''')+'''''''',''NULL'')'
- WHEN @Data_Type IN ('datetime','smalldatetime','datetime2','date', 'datetimeoffset', 'time') 
+ WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('datetime','smalldatetime','datetime2','date', 'datetimeoffset', 'time') 
  THEN 
  'COALESCE('''''''' + RTRIM(CONVERT(char,' + @Column_Name + ',127))+'''''''',''NULL'')'
- WHEN @Data_Type IN ('uniqueidentifier') 
+ WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('uniqueidentifier') 
  THEN 
  'COALESCE(''N'''''' + REPLACE(CONVERT(char(36),RTRIM(' + @Column_Name + ')),'''''''','''''''''''')+'''''''',''NULL'')'
- WHEN @Data_Type IN ('text') 
+ WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('text') 
  THEN 
  'COALESCE(''N'''''' + REPLACE(CONVERT(varchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')' 
- WHEN @Data_Type IN ('ntext') 
+ WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('ntext') 
  THEN 
  'COALESCE('''''''' + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')' 
- WHEN @Data_Type IN ('xml') 
+ WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('xml') 
  THEN 
  'COALESCE('''''''' + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')' 
- WHEN @Data_Type IN ('binary','varbinary') 
+ WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('binary','varbinary') 
  THEN 
  'COALESCE(RTRIM(CONVERT(varchar(max),' + @Column_Name + ', 1)),''NULL'')' 
- WHEN @Data_Type IN ('float','real','money','smallmoney')
+ WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('float','real','money','smallmoney')
  THEN
  'COALESCE(LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ',2)' + ')),''NULL'')' 
- WHEN @Data_Type IN ('hierarchyid')
+ WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('hierarchyid')
  THEN 
   'COALESCE(''hierarchyid::Parse(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))+''''''''+'')'',''NULL'')' 
- WHEN @Data_Type IN ('geography')
+ WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('geography')
  THEN
   'COALESCE(''geography::STGeomFromText(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(nvarchar(max),' + @Column_Name + ')' + '))+''''''''+'', 4326)'',''NULL'')' 
- WHEN @Data_Type IN ('geometry')
+ WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('geometry')
  THEN
   'COALESCE(''geometry::Parse(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(nvarchar(max),' + @Column_Name + ')' + '))+''''''''+'')'',''NULL'')' 
  ELSE 
@@ -548,13 +548,13 @@ END
  
  --Generating the column list for the MERGE statement
  SET @Column_List = @Column_List +  
- CASE WHEN @hash_compare_column IS NOT NULL AND @Column_Name = QUOTENAME(@hash_compare_column)
+ CASE WHEN @hash_compare_column IS NOT NULL AND @Column_Name = QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
  THEN ''
  ELSE @Column_Name + ',' END
  
  SET @Column_List_Insert_Values = @Column_List_Insert_Values +  
- CASE WHEN @hash_compare_column IS NOT NULL AND @Column_Name = QUOTENAME(@hash_compare_column) THEN ''
-      WHEN @Data_Type IN ('xml') THEN 'CONVERT(xml, ' + @Column_Name + '),'
+ CASE WHEN @hash_compare_column IS NOT NULL AND @Column_Name = QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT) THEN ''
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('xml') THEN 'CONVERT(xml, ' + @Column_Name + '),'
  ELSE @Column_Name + ',' END
 
  --Don't update Primary Key or Identity columns
@@ -562,35 +562,34 @@ END
  SELECT 1
  FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk ,
  INFORMATION_SCHEMA.KEY_COLUMN_USAGE c
- WHERE pk.TABLE_NAME = @Internal_Table_Name
- AND pk.TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
+ WHERE pk.TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
+ AND pk.TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
  AND CONSTRAINT_TYPE = 'PRIMARY KEY'
  AND c.TABLE_NAME = pk.TABLE_NAME
  AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
  AND c.CONSTRAINT_NAME = pk.CONSTRAINT_NAME
- AND c.COLUMN_NAME = @Column_Name_Unquoted
+ AND c.COLUMN_NAME = @Column_Name_Unquoted COLLATE DATABASE_DEFAULT
  UNION
  SELECT 1
  FROM sys.identity_columns
- WHERE OBJECT_SCHEMA_NAME(OBJECT_ID) = COALESCE(@schema, SCHEMA_NAME())
- AND OBJECT_NAME(object_id) = @Internal_Table_Name
- AND name = @Column_Name_Unquoted
+ WHERE OBJECT_SCHEMA_NAME(OBJECT_ID) = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
+ AND OBJECT_NAME(object_id) = @Internal_Table_Name COLLATE DATABASE_DEFAULT
+ AND name = @Column_Name_Unquoted COLLATE DATABASE_DEFAULT
  )
- AND (SELECT COLUMNPROPERTY(OBJECT_ID(@Source_Table_Qualified), @Column_Name_Unquoted, 'IsIdentity')) = 0
  BEGIN
- IF @Data_Type = 'xml'  
-	SET @Column_List_For_Update = @Column_List_For_Update + '[Target].' + @Column_Name + ' = CONVERT(xml, [Source].' + @Column_Name + '), ' + @b + '  '
+ IF @Data_Type COLLATE DATABASE_DEFAULT = 'xml'  
+	SET @Column_List_For_Update = @Column_List_For_Update + '[Target].' + @Column_Name + ' = CONVERT(xml, [Source].' + @Column_Name + '), ' + @b COLLATE DATABASE_DEFAULT + '  '
  ELSE
-	SET @Column_List_For_Update = @Column_List_For_Update + '[Target].' + @Column_Name + ' = [Source].' + @Column_Name + ', ' + @b + '  '
+	SET @Column_List_For_Update = @Column_List_For_Update + '[Target].' + @Column_Name + ' = [Source].' + @Column_Name + ', ' + @b COLLATE DATABASE_DEFAULT + '  '
 
  SET @Column_List_For_Check = @Column_List_For_Check +
- CASE @Data_Type 
- WHEN 'text' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR '
- WHEN 'ntext' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
+ CASE @Data_Type COLLATE DATABASE_DEFAULT
+ WHEN 'text' THEN @b COLLATE DATABASE_DEFAULT + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR '
+ WHEN 'ntext' THEN @b COLLATE DATABASE_DEFAULT + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
  WHEN 'xml' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
- WHEN 'geography' THEN CHAR(10) + CHAR(9) + '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geography::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) OR '
- WHEN 'geometry' THEN CHAR(10) + CHAR(9) + '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geometry::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) OR '
- ELSE CHAR(10) + CHAR(9) + 'NULLIF([Source].' + @Column_Name + ', [Target].' + @Column_Name + ') IS NOT NULL OR NULLIF([Target].' + @Column_Name + ', [Source].' + @Column_Name + ') IS NOT NULL OR '
+ WHEN 'geography' THEN @b COLLATE DATABASE_DEFAULT + CHAR(9) + '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geography::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) OR '
+ WHEN 'geometry' THEN @b COLLATE DATABASE_DEFAULT + CHAR(9) + '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geometry::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) OR '
+ ELSE @b COLLATE DATABASE_DEFAULT + CHAR(9) + 'NULLIF([Source].' + @Column_Name + ', [Target].' + @Column_Name + ') IS NOT NULL OR NULLIF([Target].' + @Column_Name + ', [Source].' + @Column_Name + ') IS NOT NULL OR '
  END 
  END
 
@@ -598,8 +597,8 @@ END
 
  SELECT @Column_ID = MIN(ORDINAL_POSITION) 
  FROM INFORMATION_SCHEMA.COLUMNS (NOLOCK) 
- WHERE TABLE_NAME = @Internal_Table_Name
- AND TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
+ WHERE TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
+ AND TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
  AND ORDINAL_POSITION > @Column_ID
 
  END --Loop ends here!
@@ -608,12 +607,12 @@ END
 --To get rid of the extra characters that got concatenated during the last run through the loop
 IF LEN(@Column_List_For_Update) <> 0 AND @update_existing = 1
  BEGIN
- SET @Column_List_For_Update = ' ' + LEFT(@Column_List_For_Update,len(@Column_List_For_Update) - 3)
+ SET @Column_List_For_Update = ' ' + LEFT(@Column_List_For_Update,len(@Column_List_For_Update) - 2 - LEN(@b))
  END
 
 IF LEN(@Column_List_For_Check) <> 0
  BEGIN
- SET @Column_List_For_Check = LEFT(@Column_List_For_Check,len(@Column_List_For_Check) - 3)
+ SET @Column_List_For_Check = LEFT(@Column_List_For_Check,len(@Column_List_For_Check) - 2 - LEN(@b))
  END
 
 SET @Actual_Values = LEFT(@Actual_Values,len(@Actual_Values) - 6)
@@ -633,14 +632,14 @@ DECLARE @PK_column_joins NVARCHAR(max)
 SET @PK_column_list = ''
 SET @PK_column_joins = ''
 
-IF ISNULL(@cols_to_join_on, '') = '' -- Use primary key of the source table as the basis of MERGE joins, if no join list is specified
+IF ISNULL(@cols_to_join_on COLLATE DATABASE_DEFAULT, '') = '' -- Use primary key of the source table as the basis of MERGE joins, if no join list is specified
 BEGIN
 	SELECT @PK_column_list = @PK_column_list + '[' + c.COLUMN_NAME + '], '
 	, @PK_column_joins = @PK_column_joins + '[Target].[' + c.COLUMN_NAME + '] = [Source].[' + c.COLUMN_NAME + '] AND '
 	FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk ,
 	INFORMATION_SCHEMA.KEY_COLUMN_USAGE c
-	WHERE pk.TABLE_NAME = @Internal_Table_Name
-	AND pk.TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
+	WHERE pk.TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
+	AND pk.TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
 	AND CONSTRAINT_TYPE = 'PRIMARY KEY'
 	AND c.TABLE_NAME = pk.TABLE_NAME
 	AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
@@ -652,12 +651,12 @@ BEGIN
 	SELECT @PK_column_list = @PK_column_list + '[' + c.COLUMN_NAME + '], '
 	, @PK_column_joins = @PK_column_joins + '([Target].[' + c.COLUMN_NAME + '] = [Source].[' + c.COLUMN_NAME + ']' + CASE WHEN c.IS_NULLABLE='YES' THEN ' OR ([Target].[' + c.COLUMN_NAME + '] IS NULL AND [Source].[' + c.COLUMN_NAME + '] IS NULL)' ELSE '' END + ') AND '
 	FROM INFORMATION_SCHEMA.COLUMNS AS c
-	WHERE @cols_to_join_on LIKE '%''' + c.COLUMN_NAME + '''%'
-	AND c.TABLE_NAME = @Internal_Table_Name
-	AND c.TABLE_SCHEMA = COALESCE(@schema, SCHEMA_NAME())
+	WHERE @cols_to_join_on LIKE '%''' + c.COLUMN_NAME + '''%' COLLATE DATABASE_DEFAULT
+	AND c.TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
+	AND c.TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
 END
 
-IF ISNULL(@PK_column_list, '') = '' 
+IF ISNULL(@PK_column_list COLLATE DATABASE_DEFAULT, '') = '' 
 BEGIN
 	RAISERROR('Table does not have a primary key from which to generate the join clause(s) and/or a valid @cols_to_join_on has not been specified. Either add a primary key/composite key to the table or specify the @cols_to_join_on parameter.',16,1)
 	RETURN -1 --Failure. Reason: looks like table doesn't have any primary keys
@@ -671,8 +670,8 @@ SET @PK_column_joins = LEFT(@PK_column_joins, LEN(@PK_column_joins) -4)
 SET @Actual_Values = 
  'SELECT ' + 
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
- '''''+''(''+' + @Actual_Values + '+'')''' + 
- COALESCE(@from,' FROM ' + @Source_Table_Qualified + ' (NOLOCK) ORDER BY ' + @PK_column_list)
+ '''''+''(''+' + @Actual_Values COLLATE DATABASE_DEFAULT + '+'')''' + 
+ COALESCE(@from,' FROM ' + @Source_Table_Qualified COLLATE DATABASE_DEFAULT + ' (NOLOCK) ORDER BY ' + @PK_column_list COLLATE DATABASE_DEFAULT)
 
  SET @output = CASE WHEN ISNULL(@results_to_text, 1) = 1 THEN '' ELSE '---' END
 
@@ -680,56 +679,56 @@ SET @Actual_Values =
 --Determining whether to ouput any debug information
 IF @debug_mode =1
  BEGIN
- SET @output += @b + '/*****START OF DEBUG INFORMATION*****'
- SET @output += @b + ''
- SET @output += @b + 'The primary key column list:'
- SET @output += @b + @PK_column_list
- SET @output += @b + ''
- SET @output += @b + 'The INSERT column list:'
- SET @output += @b + @Column_List
- SET @output += @b + ''
- SET @output += @b + 'The UPDATE column list:'
- SET @output += @b + @Column_List_For_Update
- SET @output += @b + ''
- SET @output += @b + 'The SELECT statement executed to generate the MERGE:'
- SET @output += @b + @Actual_Values
- SET @output += @b + ''
- SET @output += @b + '*****END OF DEBUG INFORMATION*****/'
- SET @output += @b + ''
+ SET @output += @b COLLATE DATABASE_DEFAULT + '/*****START OF DEBUG INFORMATION*****'
+ SET @output += @b COLLATE DATABASE_DEFAULT + ''
+ SET @output += @b COLLATE DATABASE_DEFAULT + 'The primary key column list:'
+ SET @output += @b COLLATE DATABASE_DEFAULT + @PK_column_list
+ SET @output += @b COLLATE DATABASE_DEFAULT + ''
+ SET @output += @b COLLATE DATABASE_DEFAULT + 'The INSERT column list:'
+ SET @output += @b COLLATE DATABASE_DEFAULT + @Column_List
+ SET @output += @b COLLATE DATABASE_DEFAULT + ''
+ SET @output += @b COLLATE DATABASE_DEFAULT + 'The UPDATE column list:'
+ SET @output += @b COLLATE DATABASE_DEFAULT + @Column_List_For_Update
+ SET @output += @b COLLATE DATABASE_DEFAULT + ''
+ SET @output += @b COLLATE DATABASE_DEFAULT + 'The SELECT statement executed to generate the MERGE:'
+ SET @output += @b COLLATE DATABASE_DEFAULT + @Actual_Values
+ SET @output += @b COLLATE DATABASE_DEFAULT + ''
+ SET @output += @b COLLATE DATABASE_DEFAULT + '*****END OF DEBUG INFORMATION*****/'
+ SET @output += @b COLLATE DATABASE_DEFAULT + ''
  END
  
 IF (@include_use_db = 1)
  BEGIN
 	SET @output += @b 
-	SET @output += @b + 'USE [' + DB_NAME() + ']'
-	SET @output += @b + ISNULL(@batch_separator, '')
+	SET @output += @b COLLATE DATABASE_DEFAULT + 'USE [' + DB_NAME() + ']'
+	SET @output += @b COLLATE DATABASE_DEFAULT + ISNULL(@batch_separator, '')
 	SET @output += @b 
  END
 
 IF (@nologo = 0)
  BEGIN
- SET @output += @b + '--MERGE generated by ''sp_generate_merge'' stored procedure'
- SET @output += @b + '--Originally by Vyas (http://vyaskn.tripod.com/code): sp_generate_inserts (build 22)'
- SET @output += @b + '--Adapted for SQL Server 2008+ by Daniel Nolan (https://twitter.com/dnlnln)'
- SET @output += @b + ''
+ SET @output += @b COLLATE DATABASE_DEFAULT + '--MERGE generated by ''sp_generate_merge'' stored procedure'
+ SET @output += @b COLLATE DATABASE_DEFAULT + '--Originally by Vyas (http://vyaskn.tripod.com/code): sp_generate_inserts (build 22)'
+ SET @output += @b COLLATE DATABASE_DEFAULT + '--Adapted for SQL Server 2008+ by Daniel Nolan (https://twitter.com/dnlnln)'
+ SET @output += @b COLLATE DATABASE_DEFAULT + ''
  END
 
 IF (@include_rowsaffected = 1) -- If the caller has elected not to include the "rows affected" section, let MERGE output the row count as it is executed.
- SET @output += @b + 'SET NOCOUNT ON'
- SET @output += @b + ''
+ SET @output += @b COLLATE DATABASE_DEFAULT + 'SET NOCOUNT ON'
+ SET @output += @b COLLATE DATABASE_DEFAULT + ''
 
 
 --Determining whether to print IDENTITY_INSERT or not
 IF (LEN(@IDN) <> 0)
  BEGIN
- SET @output += @b + 'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' ON'
- SET @output += @b + ''
+ SET @output += @b COLLATE DATABASE_DEFAULT + 'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' ON'
+ SET @output += @b COLLATE DATABASE_DEFAULT + ''
  END
 
 
 --Temporarily disable constraints on the target table
 DECLARE @output_enable_constraints NVARCHAR(MAX) = ''
-DECLARE @ignore_disable_constraints BIT = IIF((OBJECT_ID(@Source_Table_Qualified, 'U') IS NULL), 1, 0)
+DECLARE @ignore_disable_constraints BIT = IIF((OBJECT_ID(@Source_Table_Qualified COLLATE DATABASE_DEFAULT, 'U') IS NULL), 1, 0)
 IF @disable_constraints = 1 AND @ignore_disable_constraints = 1
 BEGIN
 	IF @quiet = 0
@@ -739,9 +738,9 @@ ELSE IF @disable_constraints = 1
 BEGIN
 	DECLARE @Source_Table_Constraints TABLE ([name] SYSNAME PRIMARY KEY, [is_not_trusted] bit, [is_disabled] bit)
 	INSERT INTO @Source_Table_Constraints ([name], [is_not_trusted], [is_disabled])
-	SELECT [name], [is_not_trusted], [is_disabled] FROM sys.check_constraints WHERE parent_object_id = OBJECT_ID(@Source_Table_Qualified, 'U')
+	SELECT [name], [is_not_trusted], [is_disabled] FROM sys.check_constraints WHERE parent_object_id = OBJECT_ID(@Source_Table_Qualified COLLATE DATABASE_DEFAULT, 'U')
 	UNION
-	SELECT [name], [is_not_trusted], [is_disabled] FROM sys.foreign_keys WHERE parent_object_id = OBJECT_ID(@Source_Table_Qualified, 'U')
+	SELECT [name], [is_not_trusted], [is_disabled] FROM sys.foreign_keys WHERE parent_object_id = OBJECT_ID(@Source_Table_Qualified COLLATE DATABASE_DEFAULT, 'U')
 
 	DECLARE @Constraint_Ct INT = (SELECT COUNT(1) FROM @Source_Table_Constraints)
 	IF @Constraint_Ct = 0
@@ -764,13 +763,13 @@ BEGIN
 
 		IF @All_Constraints_Enabled = 1 AND @All_Constraints_Trusted = 1
 		BEGIN
-			SET @output += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' NOCHECK CONSTRAINT ALL' -- Disable constraints temporarily
-			SET @output_enable_constraints += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' WITH CHECK CHECK CONSTRAINT ALL' -- Enable the previously disabled constraints and re-check all data
+			SET @output += @b COLLATE DATABASE_DEFAULT + 'ALTER TABLE ' + @Target_Table_For_Output + ' NOCHECK CONSTRAINT ALL' -- Disable constraints temporarily
+			SET @output_enable_constraints += @b COLLATE DATABASE_DEFAULT + 'ALTER TABLE ' + @Target_Table_For_Output + ' WITH CHECK CHECK CONSTRAINT ALL' -- Enable the previously disabled constraints and re-check all data
 		END
 		ELSE IF @All_Constraints_Enabled = 1 AND @All_Constraints_NotTrusted = 1
 		BEGIN
-			SET @output += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' NOCHECK CONSTRAINT ALL' -- Disable constraints temporarily
-			SET @output_enable_constraints += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' CHECK CONSTRAINT ALL' -- Enable the previously disabled constraints, but don't re-check data 
+			SET @output += @b COLLATE DATABASE_DEFAULT + 'ALTER TABLE ' + @Target_Table_For_Output + ' NOCHECK CONSTRAINT ALL' -- Disable constraints temporarily
+			SET @output_enable_constraints += @b COLLATE DATABASE_DEFAULT + 'ALTER TABLE ' + @Target_Table_For_Output + ' CHECK CONSTRAINT ALL' -- Enable the previously disabled constraints, but don't re-check data 
 		END
 		ELSE
 		BEGIN
@@ -783,42 +782,42 @@ BEGIN
 
 				IF (@Constraint_Item_IsDisabled = 1)
 				BEGIN
-					DELETE FROM @Source_Table_Constraints WHERE [name] = @Constraint_Item_Name -- Don't enable this previously-disabled constraint
+					DELETE FROM @Source_Table_Constraints WHERE [name] = @Constraint_Item_Name COLLATE DATABASE_DEFAULT -- Don't enable this previously-disabled constraint
 					CONTINUE;
 				END
 
-				SET @output += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' NOCHECK CONSTRAINT ' + QUOTENAME(@Constraint_Item_Name)
+				SET @output += @b COLLATE DATABASE_DEFAULT + 'ALTER TABLE ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' NOCHECK CONSTRAINT ' + QUOTENAME(@Constraint_Item_Name COLLATE DATABASE_DEFAULT)
 				IF (@Constraint_Item_IsNotTrusted = 1)
 				BEGIN
-					SET @output_enable_constraints += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' CHECK CONSTRAINT ' + QUOTENAME(@Constraint_Item_Name) -- Enable the previously disabled constraint, but don't re-check data 
+					SET @output_enable_constraints += @b COLLATE DATABASE_DEFAULT + 'ALTER TABLE ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' CHECK CONSTRAINT ' + QUOTENAME(@Constraint_Item_Name COLLATE DATABASE_DEFAULT) -- Enable the previously disabled constraint, but don't re-check data 
 				END
 				ELSE
 				BEGIN
-					SET @output_enable_constraints += @b + 'ALTER TABLE ' + @Target_Table_For_Output + ' WITH CHECK CHECK CONSTRAINT ' + QUOTENAME(@Constraint_Item_Name) -- Enable the previously disabled constraint and re-check all data
+					SET @output_enable_constraints += @b COLLATE DATABASE_DEFAULT + 'ALTER TABLE ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' WITH CHECK CHECK CONSTRAINT ' + QUOTENAME(@Constraint_Item_Name COLLATE DATABASE_DEFAULT) -- Enable the previously disabled constraint and re-check all data
 				END
 
-				DELETE FROM @Source_Table_Constraints WHERE [name] = @Constraint_Item_Name
+				DELETE FROM @Source_Table_Constraints WHERE [name] = @Constraint_Item_Name COLLATE DATABASE_DEFAULT
 			END
 		END
 	END
 END
 
 DECLARE @Output_Var_Suffix AS NVARCHAR(128) = CASE WHEN @batch_separator IS NULL THEN CAST(@Source_Table_Object_Id AS NVARCHAR(128)) ELSE '' END
-DECLARE @Merge_Output_Var_Name AS NVARCHAR(128) = N'@mergeOutput' + @Output_Var_Suffix
+DECLARE @Merge_Output_Var_Name AS NVARCHAR(128) = N'@mergeOutput' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
 IF @include_rowsaffected = 1
 BEGIN
- SET @output += @b + 'DECLARE ' + @Merge_Output_Var_Name + ' TABLE ( [DMLAction] VARCHAR(6) );'
+ SET @output += @b COLLATE DATABASE_DEFAULT + 'DECLARE ' + @Merge_Output_Var_Name COLLATE DATABASE_DEFAULT + ' TABLE ( [DMLAction] VARCHAR(6) );'
 END
 
 DECLARE @outputMergeBatch nvarchar(max), @ValuesListTotalCount int;
 
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
-SET @outputMergeBatch = @b + 'MERGE INTO ' + @Target_Table_For_Output + ' AS [Target]'
+SET @outputMergeBatch = @b COLLATE DATABASE_DEFAULT + 'MERGE INTO ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' AS [Target]'
 DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max));
 
 IF @include_values = 1
 BEGIN
- SET @outputMergeBatch += @b + 'USING ('
+ SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING ('
  --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
  INSERT INTO @tab (val)
  EXEC (@Actual_Values)
@@ -832,24 +831,24 @@ BEGIN
  ELSE
  BEGIN
   -- Mimic an empty result set by returning zero rows from the target table
-  SET @outputMergeBatch += 'SELECT ' + @Column_List + ' FROM ' + @Target_Table_For_Output + ' WHERE 1 = 0 -- Empty dataset (source table contained no rows at time of MERGE generation) '
+  SET @outputMergeBatch += 'SELECT ' + @Column_List COLLATE DATABASE_DEFAULT + ' FROM ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' WHERE 1 = 0 -- Empty dataset (source table contained no rows at time of MERGE generation) '
  END
 
  --output the columns to correspond with each of the values above--------------------
- SET @outputMergeBatch += @b + ') AS [Source] (' + @Column_List + ')'
+ SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ') AS [Source] (' + @Column_List COLLATE DATABASE_DEFAULT + ')'
 END
 ELSE
  IF @hash_compare_column IS NULL
  BEGIN
-  SET @outputMergeBatch += @b + 'USING ' + @Source_Table_For_Output + ' AS [Source]';
+  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ' AS [Source]';
  END
  ELSE
  BEGIN
-  SET @outputMergeBatch += @b + 'USING (SELECT ' + @Column_List + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(@Column_List,'],[','],''|'',[') +')) AS [' + @hash_compare_column  + '] FROM ' + @Source_Table_For_Output + ') AS [Source]'
+  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING (SELECT ' + @Column_List COLLATE DATABASE_DEFAULT + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(@Column_List COLLATE DATABASE_DEFAULT,'],[','],''|'',[') +')) AS [' + @hash_compare_column COLLATE DATABASE_DEFAULT  + '] FROM ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ') AS [Source]'
  END
 
 --Output the join columns ----------------------------------------------------------
-SET @outputMergeBatch += @b + 'ON (' + @PK_column_joins + ')'
+SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'ON (' + @PK_column_joins COLLATE DATABASE_DEFAULT + ')'
 
 
 --When matched, perform an UPDATE on any metadata columns only (ie. not on PK)------
@@ -858,36 +857,36 @@ BEGIN
  --Adding column @hash_compare_column to @ColumnList and @Column_List_For_Update if @hash_compare_column is not null
  IF @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL AND @SourceHashColumn = 0
  BEGIN
-	SET @Column_List_For_Update = @Column_List_For_Update + ',' + @b + '  [Target].[' + @hash_compare_column +'] = [Source].[' + @hash_compare_column +']'
-	SET @Column_List = @Column_List + ',[' + @hash_compare_column + ']'
+	SET @Column_List_For_Update = @Column_List_For_Update COLLATE DATABASE_DEFAULT + ',' + @b COLLATE DATABASE_DEFAULT + '  [Target].[' + @hash_compare_column COLLATE DATABASE_DEFAULT +'] = [Source].[' + @hash_compare_column COLLATE DATABASE_DEFAULT +']'
+	SET @Column_List = @Column_List + ',[' + @hash_compare_column COLLATE DATABASE_DEFAULT + ']'
  END
- SET @outputMergeBatch += @b + 'WHEN MATCHED ' + 
+ SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'WHEN MATCHED ' + 
 	 CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL
 	 THEN 'AND ([Target].[' + @hash_compare_column +'] <> [Source].[' + @hash_compare_column +'] OR [Target].[' + @hash_compare_column + '] IS NULL) ' 
 	 ELSE CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NULL THEN
 	 'AND (' + @Column_List_For_Check + ') ' ELSE '' END END + 'THEN'
- SET @outputMergeBatch += @b + ' UPDATE SET'
- SET @outputMergeBatch += @b + '  ' + LTRIM(@Column_List_For_Update)
+ SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' UPDATE SET'
+ SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + '  ' + LTRIM(@Column_List_For_Update COLLATE DATABASE_DEFAULT)
 END
 
 
 --When NOT matched by target, perform an INSERT------------------------------------
-SET @outputMergeBatch += @b + 'WHEN NOT MATCHED BY TARGET THEN';
-SET @outputMergeBatch += @b + ' INSERT(' + @Column_List + ')'
-SET @outputMergeBatch += @b + ' VALUES(' + REPLACE(@Column_List_Insert_Values, '[', '[Source].[') + ')'
+SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'WHEN NOT MATCHED BY TARGET THEN';
+SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' INSERT(' + @Column_List COLLATE DATABASE_DEFAULT + ')'
+SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' VALUES(' + REPLACE(@Column_List COLLATE DATABASE_DEFAULT, '[', '[Source].[') + ')'
 
 
 --When NOT matched by source, DELETE the row as required
 IF @delete_if_not_matched=1 
 BEGIN
- SET @outputMergeBatch += @b + 'WHEN NOT MATCHED BY SOURCE THEN '
- SET @outputMergeBatch += @b + ' DELETE'
+ SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'WHEN NOT MATCHED BY SOURCE THEN '
+ SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' DELETE'
 END
 IF @include_rowsaffected = 1
 BEGIN
- SET @outputMergeBatch += @b + 'OUTPUT $action INTO ' + @Merge_Output_Var_Name
+ SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'OUTPUT $action INTO ' + @Merge_Output_Var_Name
 END
-SET @outputMergeBatch += ';' + @b
+SET @outputMergeBatch += ';' + @b COLLATE DATABASE_DEFAULT
 
 
 IF @include_values = 1 AND @ValuesListTotalCount <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
@@ -902,12 +901,12 @@ BEGIN
 		SET @ValuesListIDTo = @ValuesListIDFrom + @max_rows_per_batch - 1
 		SET @CurrentValuesList = ''
 
-		SET @CurrentValuesList += CAST((SELECT @b + CASE WHEN ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) = 1 THEN '  ' ELSE ' ,' END + val
+		SET @CurrentValuesList += CAST((SELECT @b COLLATE DATABASE_DEFAULT + CASE WHEN ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) = 1 THEN '  ' ELSE ' ,' END + val
 						FROM @tab
 						WHERE ID BETWEEN @ValuesListIDFrom AND @ValuesListIDTo
 						ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'NVARCHAR(MAX)');
 		
-		SET @output += REPLACE(@outputMergeBatch, '{{ValuesList}}', @CurrentValuesList);
+		SET @output += REPLACE(@outputMergeBatch COLLATE DATABASE_DEFAULT, '{{ValuesList}}', @CurrentValuesList);
 
 		SET @ValuesListIDFrom = @ValuesListIDTo + 1;
 	END
@@ -921,37 +920,30 @@ END
 --Display the number of affected rows to the user, or report if an error occurred---
 IF @include_rowsaffected = 1
 BEGIN
- DECLARE @Merge_Error_Var_Name AS NVARCHAR(128) = N'@mergeError' + @Output_Var_Suffix
- DECLARE @Merge_Count_Var_Name AS NVARCHAR(128) = N'@mergeCount' + @Output_Var_Suffix
- DECLARE @Merge_CountIns_Var_Name AS NVARCHAR(128) = N'@mergeCountIns' + @Output_Var_Suffix
- DECLARE @Merge_CountUpd_Var_Name AS NVARCHAR(128) = N'@mergeCountUpd' + @Output_Var_Suffix
- DECLARE @Merge_CountDel_Var_Name AS NVARCHAR(128) = N'@mergeCountDel' + @Output_Var_Suffix
+ DECLARE @Merge_Error_Var_Name AS NVARCHAR(128) = N'@mergeError' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
+ DECLARE @Merge_Count_Var_Name AS NVARCHAR(128) = N'@mergeCount' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
+ DECLARE @Merge_CountIns_Var_Name AS NVARCHAR(128) = N'@mergeCountIns' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
+ DECLARE @Merge_CountUpd_Var_Name AS NVARCHAR(128) = N'@mergeCountUpd' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
+ DECLARE @Merge_CountDel_Var_Name AS NVARCHAR(128) = N'@mergeCountDel' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
 
 
- SET @output += @b + 'DECLARE ' + @Merge_Error_Var_Name + ' int,'
- SET @output += @b + @Merge_Count_Var_Name + ' int,'
- SET @output += @b + @Merge_CountIns_Var_Name + ' int,'
- SET @output += @b + @Merge_CountUpd_Var_Name + ' int,'
- SET @output += @b + @Merge_CountDel_Var_Name + ' int'
- SET @output += @b + 'SELECT ' + @Merge_Error_Var_Name + ' = @@ERROR'
- SET @output += @b + 'SELECT ' + @Merge_Count_Var_Name + ' = COUNT(1), ' + @Merge_CountIns_Var_Name + ' = SUM(IIF([DMLAction] = ''INSERT'', 1, 0)), ' + @Merge_CountUpd_Var_Name + ' = SUM(IIF([DMLAction] = ''UPDATE'', 1, 0)), ' + @Merge_CountDel_Var_Name + ' = SUM (IIF([DMLAction] = ''DELETE'', 1, 0)) FROM ' + @Merge_Output_Var_Name
- SET @output += @b + 'IF ' + @Merge_Error_Var_Name + ' != 0'
- SET @output += @b + ' BEGIN'
- SET @output += @b + ' PRINT ''ERROR OCCURRED IN MERGE FOR ' + @Target_Table_For_Output + '. Rows affected: '' + CAST('+ @Merge_Count_Var_Name + ' AS VARCHAR(100)); -- SQL should always return zero rows affected';
- SET @output += @b + ' END'
- SET @output += @b + 'ELSE'
- SET @output += @b + ' BEGIN'
- SET @output += @b + ' PRINT ''' + @Target_Table_For_Output + ' rows affected by MERGE: '' + CAST(COALESCE(' + @Merge_Count_Var_Name + ',0) AS VARCHAR(100)) + '' (Inserted: '' + CAST(COALESCE(' + @Merge_CountIns_Var_Name + ',0) AS VARCHAR(100)) + ''; Updated: '' + CAST(COALESCE(' + @Merge_CountUpd_Var_Name + ',0) AS VARCHAR(100)) + ''; Deleted: '' + CAST(COALESCE(' + @Merge_CountDel_Var_Name + ',0) AS VARCHAR(100)) + '')'' ;'
- SET @output += @b + ' END'
- SET @output += @b + ISNULL(@batch_separator, '')
- SET @output += @b + @b
+ SET @output += @b COLLATE DATABASE_DEFAULT + 'DECLARE ' + @Merge_Error_Var_Name COLLATE DATABASE_DEFAULT + ' int,'
+ SET @output += @b COLLATE DATABASE_DEFAULT + @Merge_Count_Var_Name COLLATE DATABASE_DEFAULT + ' int,'
+ SET @output += @b COLLATE DATABASE_DEFAULT + @Merge_CountIns_Var_Name COLLATE DATABASE_DEFAULT + ' int,'
+ SET @output += @b COLLATE DATABASE_DEFAULT + @Merge_CountUpd_Var_Name COLLATE DATABASE_DEFAULT + ' int,'
+ SET @output += @b COLLATE DATABASE_DEFAULT + @Merge_CountDel_Var_Name COLLATE DATABASE_DEFAULT + ' int'
+ SET @output += @b COLLATE DATABASE_DEFAULT + 'SELECT ' + @Merge_Error_Var_Name COLLATE DATABASE_DEFAULT + ' = @@ERROR'
+ SET @output += @b COLLATE DATABASE_DEFAULT + 'SELECT ' + @Merge_Count_Var_Name COLLATE DATABASE_DEFAULT + ' = COUNT(1), ' + @Merge_CountIns_Var_Name COLLATE DATABASE_DEFAULT + ' = SUM(IIF([DMLAction] = ''INSERT'', 1, 0)), ' + @Merge_CountUpd_Var_Name COLLATE DATABASE_DEFAULT + ' = SUM(IIF([DMLAction] = ''UPDATE'', 1, 0)), ' + @Merge_CountDel_Var_Name COLLATE DATABASE_DEFAULT + ' = SUM (IIF([DMLAction] = ''DELETE'', 1, 0)) FROM ' + @Merge_Output_Var_Name COLLATE DATABASE_DEFAULT
+ SET @output += @b COLLATE DATABASE_DEFAULT + 'IF ' + @Merge_Error_Var_Name COLLATE DATABASE_DEFAULT + ' != 0'
+ SET @output += @b COLLATE DATABASE_DEFAULT + ' PRINT ''ERROR OCCURRED IN MERGE FOR ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + '. Rows affected: '' + CAST('+ @Merge_Count_Var_Name COLLATE DATABASE_DEFAULT + ' AS VARCHAR(100)); -- SQL should always return zero rows affected';
+ SET @output += @b COLLATE DATABASE_DEFAULT + ' PRINT ''' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' rows affected by MERGE: '' + CAST(COALESCE(' + @Merge_Count_Var_Name COLLATE DATABASE_DEFAULT + ',0) AS VARCHAR(100)) + '' (Inserted: '' + CAST(COALESCE(' + @Merge_CountIns_Var_Name COLLATE DATABASE_DEFAULT + ',0) AS VARCHAR(100)) + ''; Updated: '' + CAST(COALESCE(' + @Merge_CountUpd_Var_Name COLLATE DATABASE_DEFAULT + ',0) AS VARCHAR(100)) + ''; Deleted: '' + CAST(COALESCE(' + @Merge_CountDel_Var_Name COLLATE DATABASE_DEFAULT + ',0) AS VARCHAR(100)) + '')'' ;'
 END
 
 --Re-enable the temporarily disabled constraints-------------------------------------
 IF @disable_constraints = 1 AND @ignore_disable_constraints = 0
 BEGIN
 	SET @output += @output_enable_constraints
-	SET @output += @b + ISNULL(@batch_separator, '')
+	SET @output += @b COLLATE DATABASE_DEFAULT + ISNULL(@batch_separator COLLATE DATABASE_DEFAULT, '')
 	SET @output += @b
 END
 
@@ -960,7 +952,7 @@ END
 IF (LEN(@IDN) <> 0)
  BEGIN
  SET @output += @b
- SET @output += @b +'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' OFF'
+ SET @output += @b COLLATE DATABASE_DEFAULT +'SET IDENTITY_INSERT ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' OFF'
  	
  END
 
@@ -968,12 +960,12 @@ IF (@include_rowsaffected = 1)
 BEGIN
  SET @output += @b
  SET @output +=      'SET NOCOUNT OFF'
- SET @output += @b + ISNULL(@batch_separator, '')
+ SET @output += @b COLLATE DATABASE_DEFAULT + ISNULL(@batch_separator COLLATE DATABASE_DEFAULT, '')
  SET @output += @b
 END
 
-SET @output += @b + ''
-SET @output += @b + ''
+SET @output += @b COLLATE DATABASE_DEFAULT + ''
+SET @output += @b COLLATE DATABASE_DEFAULT + ''
 
 IF @results_to_text = 1
 BEGIN
