@@ -32,7 +32,7 @@ CREATE PROC [sp_generate_merge]
  @cols_to_join_on nvarchar(max) = NULL, -- List of columns needed to JOIN the source table to the target table (useful when @table_name is missing a primary key) 
  @update_only_if_changed bit = 1, -- When 1, only performs an UPDATE operation if an included column in a matched row has changed.
  @hash_compare_column nvarchar(128) = NULL, -- When specified, change detection will be based on a SHA2_256 hash of the source data (the hash value will be stored in this @target_table column for later comparison; see Example 16)
- @delete_if_not_matched bit = 1, -- When 1, deletes unmatched source rows from target, when 0 source rows will only be used to update existing rows or insert new.
+ @delete_if_not_matched bit = 1, -- When 1, performs a DELETE when the target includes extra rows. When 0, the MERGE statement will only include the INSERT and, if @update_existing=1, UPDATE operations.
  @disable_constraints bit = 0, -- When 1, disables foreign key constraints and enables them after the MERGE statement
  @ommit_computed_cols bit = 1, -- When 1, computed columns will not be included in the MERGE statement
  @ommit_generated_always_cols bit = 1, -- When 1, GENERATED ALWAYS columns will not be included in the MERGE statement
@@ -42,7 +42,7 @@ CREATE PROC [sp_generate_merge]
  @nologo bit = 0, -- When 1, the "About" comment is suppressed from output
  @batch_separator nvarchar(50) = 'GO', -- Batch separator to use. Specify NULL to output all statements within a single batch
  @output nvarchar(max) = null output, -- Use this output parameter to return the generated T-SQL batches to the caller (Hint: specify @batch_separator=NULL to output all statements within a single batch)
- @update_existing bit = 1, -- When 1, performs an UPDATE operation on existing rows.
+ @update_existing bit = 1, -- When 1, performs an UPDATE operation on existing rows. When 0, the MERGE statement will only include the INSERT and, if @delete_if_not_matched=1, DELETE operations.
  @max_rows_per_batch int = NULL -- When not NULL, splits the MERGE command into multiple batches, each batch merges X rows as specified
 )
 AS
@@ -591,7 +591,7 @@ END
 
 
 --To get rid of the extra characters that got concatenated during the last run through the loop
-IF LEN(@Column_List_For_Update) <> 0 AND @update_existing = 1
+IF LEN(@Column_List_For_Update) <> 0
  BEGIN
  SET @Column_List_For_Update = ' ' + LEFT(@Column_List_For_Update,len(@Column_List_For_Update) - 3)
  END
@@ -834,7 +834,7 @@ SET @outputMergeBatch += @b + 'ON (' + @PK_column_joins + ')'
 
 
 --When matched, perform an UPDATE on any metadata columns only (ie. not on PK)------
-IF LEN(@Column_List_For_Update) <> 0
+IF LEN(@Column_List_For_Update) <> 0 AND @update_existing = 1
 BEGIN
  --Adding column @hash_compare_column to @ColumnList and @Column_List_For_Update if @hash_compare_column is not null
  IF @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL AND @SourceHashColumn = 0
