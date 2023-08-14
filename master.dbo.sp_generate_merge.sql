@@ -43,7 +43,8 @@ CREATE PROC [sp_generate_merge]
  @batch_separator nvarchar(50) = 'GO', -- Batch separator to use. Specify NULL to output all statements within a single batch
  @output nvarchar(max) = null output, -- Use this output parameter to return the generated T-SQL batches to the caller (Hint: specify @batch_separator=NULL to output all statements within a single batch)
  @update_existing bit = 1, -- When 1, performs an UPDATE operation on existing rows. When 0, the MERGE statement will only include the INSERT and, if @delete_if_not_matched=1, DELETE operations.
- @max_rows_per_batch int = NULL -- When not NULL, splits the MERGE command into multiple batches, each batch merges X rows as specified
+ @max_rows_per_batch int = NULL, -- When not NULL, splits the MERGE command into multiple batches, each batch merges X rows as specified
+ @quiet bit = 0 -- When 1, this proc will not print informational messages and warnings
 )
 AS
 BEGIN
@@ -324,6 +325,7 @@ ELSE
 --Variable declarations
 DECLARE @Column_ID int, 
  @Column_List nvarchar(max), 
+ @Column_List_Insert_Values nvarchar(max),
  @Column_List_For_Update nvarchar(max), 
  @Column_List_For_Check nvarchar(max), 
  @Column_Name nvarchar(128), 
@@ -369,6 +371,7 @@ SET @Column_ID = 0
 SET @Column_Name = ''
 SET @Column_Name_Unquoted = ''
 SET @Column_List = ''
+SET @Column_List_Insert_Values = ''
 SET @Column_List_For_Update = ''
 SET @Column_List_For_Check = ''
 SET @Actual_Values = ''
@@ -389,7 +392,7 @@ BEGIN
   RETURN -1 --Failure. Reason: Omitting the schema in this scenario is likely a mistake
  END
 
-  SET @Target_Table_For_Output = @target_table 
+  SET @Target_Table_For_Output = @target_table
  END
  ELSE
  BEGIN
@@ -448,14 +451,16 @@ BEGIN
   --Computed columns can't be inserted/updated, so exclude them unless directed otherwise
   IF @ommit_computed_cols = 1 AND COLUMNPROPERTY( @Source_Table_Object_Id,@Column_Name_Unquoted,'IsComputed') = 1
   BEGIN
-    PRINT 'Warning: The ' + @Column_Name + ' computed column will be excluded from the MERGE statement. Specify @ommit_computed_cols = 0 to include computed columns.'
+    IF @quiet = 0
+      PRINT 'Warning: The ' + @Column_Name + ' computed column will be excluded from the MERGE statement. Specify @ommit_computed_cols = 0 to include computed columns.'
     GOTO SKIP_LOOP 
   END
 
   --GENERATED ALWAYS type columns can't be inserted/updated, so exclude them unless directed otherwise
   IF @ommit_generated_always_cols = 1 AND ISNULL(COLUMNPROPERTY( @Source_Table_Object_Id,@Column_Name_Unquoted,'GeneratedAlwaysType'), 0) <> 0
   BEGIN
-    PRINT 'Warning: The ' + @Column_Name + ' GENERATED ALWAYS column will be excluded from the MERGE statement. Specify @ommit_generated_always_cols = 0 to include GENERATED ALWAYS columns.'
+    IF @quiet = 0
+      PRINT 'Warning: The ' + @Column_Name + ' GENERATED ALWAYS column will be excluded from the MERGE statement. Specify @ommit_generated_always_cols = 0 to include GENERATED ALWAYS columns.'
     GOTO SKIP_LOOP 
   END
 
@@ -498,8 +503,12 @@ BEGIN
   
   --Add the column to the list to be serialised, unless it is the @hash_compare_column
   IF @hash_compare_column IS NULL OR @Column_Name <> QUOTENAME(@hash_compare_column)
+  BEGIN
     SET @Column_List += @Column_Name + ','
-  
+    DECLARE @Insert_Column_Spec NVARCHAR(128) = CASE WHEN @Data_Type = 'xml' THEN N'CONVERT(xml, ' + @Column_Name + ')' ELSE @Column_Name END
+    SET @Column_List_Insert_Values += @Insert_Column_Spec + ','
+  END
+
   --Add the column to the list of columns to be updated, unless it is a primary key or identity column
   IF NOT EXISTS
   (
@@ -521,16 +530,17 @@ BEGIN
     AND name = @Column_Name_Unquoted
   )
   BEGIN
-    SET @Column_List_For_Update += '[Target].' + @Column_Name + ' = [Source].' + @Column_Name + ', ' + @b + '  '
-    SET @Column_List_For_Check +=
-      CASE @Data_Type 
-        WHEN 'text'      THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR '
-        WHEN 'ntext'     THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
-        WHEN 'xml'       THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
-        WHEN 'geography' THEN CHAR(10) + CHAR(9) + '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geography::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) OR '
-        WHEN 'geometry'  THEN CHAR(10) + CHAR(9) + '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geometry::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) OR '
-        ELSE                  CHAR(10) + CHAR(9) + 'NULLIF([Source].' + @Column_Name + ', [Target].' + @Column_Name + ') IS NOT NULL OR NULLIF([Target].' + @Column_Name + ', [Source].' + @Column_Name + ') IS NOT NULL OR '
-      END
+    DECLARE @Source_Column_Spec NVARCHAR(128) = CASE @Data_Type WHEN 'xml' THEN N'CONVERT(xml, [Source].' + @Column_Name + ')' ELSE '[Source].' + @Column_Name END
+    SET @Column_List_For_Update += '[Target].' + @Column_Name + ' = ' + @Source_Column_Spec + ', ' + @b + '  '
+    SET @Column_List_For_Check += @b + CHAR(9) + 
+      CASE @Data_Type
+        WHEN 'text'      THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL'
+        WHEN 'ntext'     THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL' 
+        WHEN 'xml'       THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL' 
+        WHEN 'geography' THEN '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geography::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0)'
+        WHEN 'geometry'  THEN '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geometry::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0)'
+        ELSE                  'NULLIF([Source].' + @Column_Name + ', [Target].' + @Column_Name + ') IS NOT NULL OR NULLIF([Target].' + @Column_Name + ', [Source].' + @Column_Name + ') IS NOT NULL'
+      END + ' OR '
   END
 
   SKIP_LOOP: --The label used in GOTO
@@ -547,12 +557,12 @@ END --WHILE LOOP END
 --Get rid of the extra characters that got concatenated during the last run through the loop
 IF LEN(@Column_List_For_Update) <> 0
  BEGIN
- SET @Column_List_For_Update = ' ' + LEFT(@Column_List_For_Update,len(@Column_List_For_Update) - 3)
+ SET @Column_List_For_Update = ' ' + LEFT(@Column_List_For_Update,len(@Column_List_For_Update) - 2 - LEN(@b))
  END
 
 IF LEN(@Column_List_For_Check) <> 0
  BEGIN
- SET @Column_List_For_Check = LEFT(@Column_List_For_Check,len(@Column_List_For_Check) - 3)
+ SET @Column_List_For_Check = LEFT(@Column_List_For_Check,len(@Column_List_For_Check) - 2 - LEN(@b))
  END
 
 SET @Actual_Values = LEFT(@Actual_Values,len(@Actual_Values) - 6)
@@ -564,6 +574,7 @@ IF LEN(LTRIM(@Column_List)) = 0
  RETURN -1 --Failure. Reason: Looks like all the columns are ommitted using the @cols_to_exclude parameter
  END
 
+SET @Column_List_Insert_Values = LEFT(@Column_List_Insert_Values,len(@Column_List_Insert_Values) - 1)
 
 --Get the join columns ----------------------------------------------------------
 DECLARE @PK_column_list NVARCHAR(max)
@@ -616,7 +627,7 @@ SET @Actual_Values =
 
 
 --Determining whether to ouput any debug information
-IF @debug_mode =1
+IF @debug_mode = 1 AND @quiet = 0
  BEGIN
  SET @output += @b + '/*****START OF DEBUG INFORMATION*****'
  SET @output += @b + ''
@@ -636,7 +647,7 @@ IF @debug_mode =1
  SET @output += @b + ''
  END
  
-IF (@include_use_db = 1)
+IF @include_use_db = 1
  BEGIN
 	SET @output += @b 
 	SET @output += @b + 'USE [' + DB_NAME() + ']'
@@ -644,7 +655,7 @@ IF (@include_use_db = 1)
 	SET @output += @b 
  END
 
-IF (@nologo = 0)
+IF @nologo = 0 AND @quiet = 0
  BEGIN
  SET @output += @b + '--MERGE generated by ''sp_generate_merge'' stored procedure'
  SET @output += @b + '--Originally by Vyas (http://vyaskn.tripod.com/code): sp_generate_inserts (build 22)'
@@ -652,13 +663,13 @@ IF (@nologo = 0)
  SET @output += @b + ''
  END
 
-IF (@include_rowsaffected = 1) -- If the caller has elected not to include the "rows affected" section, let MERGE output the row count as it is executed.
+IF @include_rowsaffected = 1 -- If the caller has elected not to include the "rows affected" section, let MERGE output the row count as it is executed.
  SET @output += @b + 'SET NOCOUNT ON'
  SET @output += @b + ''
 
 
 --Determining whether to print IDENTITY_INSERT or not
-IF (LEN(@IDN) <> 0)
+IF LEN(@IDN) <> 0
  BEGIN
  SET @output += @b + 'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' ON'
  SET @output += @b + ''
@@ -670,7 +681,8 @@ DECLARE @output_enable_constraints NVARCHAR(MAX) = ''
 DECLARE @ignore_disable_constraints BIT = IIF((OBJECT_ID(@Source_Table_Qualified, 'U') IS NULL), 1, 0)
 IF @disable_constraints = 1 AND @ignore_disable_constraints = 1
 BEGIN
-	PRINT 'Warning: @disable_constraints=1 will be ignored as the source table does not exist'
+	IF @quiet = 0
+		PRINT 'Warning: @disable_constraints=1 will be ignored as the source table does not exist'
 END
 ELSE IF @disable_constraints = 1
 BEGIN
@@ -683,12 +695,14 @@ BEGIN
 	DECLARE @Constraint_Ct INT = (SELECT COUNT(1) FROM @Source_Table_Constraints)
 	IF @Constraint_Ct = 0
 	BEGIN
-		PRINT 'Warning: @disable_constraints=1 will be ignored as there are no foreign key or check constraints on the source table'
+		IF @quiet = 0
+			PRINT 'Warning: @disable_constraints=1 will be ignored as there are no foreign key or check constraints on the source table'
 		SET @ignore_disable_constraints = 1
 	END
 	ELSE IF ((SELECT COUNT(1) FROM @Source_Table_Constraints WHERE [is_disabled] = 1) = (SELECT COUNT(1) FROM @Source_Table_Constraints))
 	BEGIN
-		PRINT 'Warning: @disable_constraints=1 will be ignored as all foreign key and/or check constraints on the source table are currently disabled'
+		IF @quiet = 0
+			PRINT 'Warning: @disable_constraints=1 will be ignored as all foreign key and/or check constraints on the source table are currently disabled'
 		SET @ignore_disable_constraints = 1
 	END
 	ELSE
@@ -740,7 +754,7 @@ END
 
 DECLARE @Output_Var_Suffix AS NVARCHAR(128) = CASE WHEN @batch_separator IS NULL THEN REPLACE(CAST(@Source_Table_Object_Id AS NVARCHAR(128)), '-', '') ELSE '' END
 DECLARE @Merge_Output_Var_Name AS NVARCHAR(128) = N'@mergeOutput' + @Output_Var_Suffix
-IF @include_rowsaffected = 1
+IF @include_rowsaffected = 1 AND @quiet = 0
 BEGIN
  SET @output += @b + 'DECLARE ' + @Merge_Output_Var_Name + ' TABLE ( [DMLAction] VARCHAR(6) );'
 END
@@ -809,7 +823,7 @@ END
 --When NOT matched by target, perform an INSERT------------------------------------
 SET @outputMergeBatch += @b + 'WHEN NOT MATCHED BY TARGET THEN';
 SET @outputMergeBatch += @b + ' INSERT(' + @Column_List + ')'
-SET @outputMergeBatch += @b + ' VALUES(' + REPLACE(@Column_List, '[', '[Source].[') + ')'
+SET @outputMergeBatch += @b + ' VALUES(' + REPLACE(@Column_List_Insert_Values, '[', '[Source].[') + ')'
 
 
 --When NOT matched by source, DELETE the row as required
@@ -818,7 +832,7 @@ BEGIN
  SET @outputMergeBatch += @b + 'WHEN NOT MATCHED BY SOURCE THEN '
  SET @outputMergeBatch += @b + ' DELETE'
 END
-IF @include_rowsaffected = 1
+IF @include_rowsaffected = 1 AND @quiet = 0
 BEGIN
  SET @outputMergeBatch += @b + 'OUTPUT $action INTO ' + @Merge_Output_Var_Name
 END
@@ -854,7 +868,7 @@ END
 
 
 --Display the number of affected rows to the user, or report if an error occurred---
-IF @include_rowsaffected = 1
+IF @include_rowsaffected = 1 AND @quiet = 0
 BEGIN
  DECLARE @Merge_Error_Var_Name AS NVARCHAR(128) = N'@mergeError' + @Output_Var_Suffix
  DECLARE @Merge_Count_Var_Name AS NVARCHAR(128) = N'@mergeCount' + @Output_Var_Suffix
@@ -919,13 +933,16 @@ ELSE IF @results_to_text = 0
 BEGIN
 	--output the statement as xml (to overcome SSMS 4000/8000 char limitation)
 	SELECT [processing-instruction(x)]=@output FOR XML PATH(''),TYPE;
-	PRINT 'MERGE statement has been wrapped in an XML fragment and output successfully.'
-	PRINT 'Ensure you have Results to Grid enabled and then click the hyperlink to copy the statement within the fragment.'
-	PRINT ''
-	PRINT 'If you would prefer to have results output directly (without XML) specify @results_to_text = 1, however please'
-	PRINT 'note that the results may be truncated by your SQL client to 4000 nchars.'
+	IF @quiet = 0
+	BEGIN
+		PRINT 'MERGE statement has been wrapped in an XML fragment and output successfully.'
+		PRINT 'Ensure you have Results to Grid enabled and then click the hyperlink to copy the statement within the fragment.'
+		PRINT ''
+		PRINT 'If you would prefer to have results output directly (without XML) specify @results_to_text = 1, however please'
+		PRINT 'note that the results may be truncated by your SQL client to 4000 nchars.'
+	END
 END
-ELSE
+ELSE IF @quiet = 0
 BEGIN
 	PRINT 'MERGE statement generated successfully (refer to @output OUTPUT parameter for generated T-SQL).'
 END
