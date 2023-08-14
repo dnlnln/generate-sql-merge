@@ -76,11 +76,10 @@ Purpose: To generate a MERGE statement from existing data, which will INSERT/UPD
 
 Written by: Narayana Vyas Kondreddi
  http://vyaskn.tripod.com/code
- vyaskn@hotmail.com
 
  Daniel Nolan
- https://twitter.com/dnlnln
- dan@danere.com
+ https://danielnolan.io
+
 
 
 Acknowledgements (sp_generate_merge):
@@ -442,15 +441,15 @@ BEGIN
     GOTO SKIP_LOOP
 
   --Include identity columns, unless the user has decided not to
-  IF @ommit_identity = 1 AND (SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsIdentity')) = 1
+  IF @ommit_identity = 1 AND COLUMNPROPERTY( @Source_Table_Object_Id,@Column_Name_Unquoted,'IsIdentity') = 1
     GOTO SKIP_LOOP
 
   --Identity column? Capture the name
-  IF (SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsIdentity')) = 1 
+  IF COLUMNPROPERTY( @Source_Table_Object_Id,@Column_Name_Unquoted,'IsIdentity') = 1 
     SET @IDN = @Column_Name COLLATE DATABASE_DEFAULT
 
   --Computed columns can't be inserted/updated, so exclude them unless directed otherwise
-  IF @ommit_computed_cols = 1 AND (SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsComputed')) = 1
+  IF @ommit_computed_cols = 1 AND COLUMNPROPERTY( @Source_Table_Object_Id,@Column_Name_Unquoted,'IsComputed') = 1
   BEGIN
     IF @quiet = 0
       PRINT 'Warning: The ' + @Column_Name + ' computed column will be excluded from the MERGE statement. Specify @ommit_computed_cols = 0 to include computed columns.'
@@ -458,7 +457,7 @@ BEGIN
   END
 
   --GENERATED ALWAYS type columns can't be inserted/updated, so exclude them unless directed otherwise
-  IF @ommit_generated_always_cols = 1 AND ISNULL((SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'GeneratedAlwaysType')), 0) <> 0
+  IF @ommit_generated_always_cols = 1 AND ISNULL(COLUMNPROPERTY( @Source_Table_Object_Id,@Column_Name_Unquoted,'GeneratedAlwaysType'), 0) <> 0
   BEGIN
     IF @quiet = 0
       PRINT 'Warning: The ' + @Column_Name + ' GENERATED ALWAYS column will be excluded from the MERGE statement. Specify @ommit_generated_always_cols = 0 to include GENERATED ALWAYS columns.'
@@ -753,7 +752,7 @@ BEGIN
 	END
 END
 
-DECLARE @Output_Var_Suffix AS NVARCHAR(128) = CASE WHEN @batch_separator IS NULL THEN CAST(@Source_Table_Object_Id AS NVARCHAR(128)) ELSE '' END
+DECLARE @Output_Var_Suffix AS NVARCHAR(128) = CASE WHEN @batch_separator IS NULL THEN REPLACE(CAST(@Source_Table_Object_Id AS NVARCHAR(128)), '-', '') ELSE '' END
 DECLARE @Merge_Output_Var_Name AS NVARCHAR(128) = N'@mergeOutput' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
 IF @include_rowsaffected = 1
 BEGIN
