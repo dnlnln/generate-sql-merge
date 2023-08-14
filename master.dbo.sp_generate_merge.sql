@@ -75,11 +75,10 @@ Purpose: To generate a MERGE statement from existing data, which will INSERT/UPD
 
 Written by: Narayana Vyas Kondreddi
  http://vyaskn.tripod.com/code
- vyaskn@hotmail.com
 
  Daniel Nolan
- https://twitter.com/dnlnln
- dan@danere.com
+ https://danielnolan.io
+
 
 
 Acknowledgements (sp_generate_merge):
