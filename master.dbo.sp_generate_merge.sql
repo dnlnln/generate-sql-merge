@@ -24,7 +24,7 @@ CREATE PROC [sp_generate_merge]
  @include_timestamp bit = 0, -- [DEPRECATED] Sql Server does not allow modification of TIMESTAMP datatype
  @debug_mode bit = 0, -- If @debug_mode is set to 1, the SQL statements constructed by this procedure will be printed for later examination
  @schema nvarchar(64) = NULL, -- Use this parameter if you are not the owner of the table
- @ommit_images bit = 0, -- Use this parameter to generate MERGE statement by omitting the 'image' columns
+ @ommit_images bit = 0, -- As the image data type is currently unsupported, leaving @ommit_images=0 will cause an error to be raised by sp_generate_merge if an image column is found in the specified table. Proactively specify @ommit_images=1 to exclude image columns and avoid this error.
  @ommit_identity bit = 0, -- Use this parameter to omit the identity columns
  @top int = NULL, -- Use this parameter to generate a MERGE statement only for the TOP n rows
  @cols_to_include nvarchar(max) = NULL, -- List of columns to be included in the MERGE statement
@@ -418,193 +418,144 @@ WHERE TABLE_NAME = @Internal_Table_Name
 AND TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
 
 
---Loop through all the columns of the table, to get the column names and their data types
+--Loop through all the columns of the table, decide whether to include/exclude each one, and put together the value serialisation SQL
 WHILE @Column_ID IS NOT NULL
- BEGIN
- SELECT @Column_Name = QUOTENAME(COLUMN_NAME), 
- @Column_Name_Unquoted = COLUMN_NAME,
- @Data_Type = DATA_TYPE 
- FROM INFORMATION_SCHEMA.COLUMNS (NOLOCK) 
- WHERE ORDINAL_POSITION = @Column_ID
- AND TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
- AND TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
-
-
-IF @Data_Type COLLATE DATABASE_DEFAULT IN ('timestamp','rowversion') --SQL Server doesn't allow Timestamp/Rowversion column updates
 BEGIN
-	GOTO SKIP_LOOP
-END
+  SELECT @Column_Name = QUOTENAME(COLUMN_NAME), 
+         @Column_Name_Unquoted = COLUMN_NAME,
+         @Data_Type = DATA_TYPE 
+  FROM INFORMATION_SCHEMA.COLUMNS (NOLOCK) 
+  WHERE ORDINAL_POSITION = @Column_ID
+  AND TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
+  AND TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
 
- IF @cols_to_include IS NOT NULL --Selecting only user specified columns
- BEGIN
- IF CHARINDEX( '''' + SUBSTRING(@Column_Name COLLATE DATABASE_DEFAULT,2,LEN(@Column_Name COLLATE DATABASE_DEFAULT)-2) + '''',@cols_to_include COLLATE DATABASE_DEFAULT) = 0 
- BEGIN
- GOTO SKIP_LOOP
- END
- END
+  --Timestamp/Rowversion columns can't be inserted/updated due to SQL Server limitations, so exclude them
+  IF @Data_Type COLLATE DATABASE_DEFAULT IN ('timestamp','rowversion')
+    GOTO SKIP_LOOP
 
- IF @cols_to_exclude IS NOT NULL --Selecting only user specified columns
- BEGIN
- IF CHARINDEX( '''' + SUBSTRING(@Column_Name COLLATE DATABASE_DEFAULT,2,LEN(@Column_Name COLLATE DATABASE_DEFAULT)-2) + '''',@cols_to_exclude COLLATE DATABASE_DEFAULT) <> 0 
- BEGIN
- GOTO SKIP_LOOP
- END
- END
+  --Only include the specified columns, if @cols_to_include has been provided
+  IF @cols_to_include IS NOT NULL AND CHARINDEX( '''' + SUBSTRING(@Column_Name COLLATE DATABASE_DEFAULT,2,LEN(@Column_Name COLLATE DATABASE_DEFAULT)-2) + '''',@cols_to_include COLLATE DATABASE_DEFAULT) = 0
+    GOTO SKIP_LOOP
 
- --Making sure to output SET IDENTITY_INSERT ON/OFF in case the table has an IDENTITY column
- IF (SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsIdentity')) = 1 
- BEGIN
- IF @ommit_identity = 0 --Determing whether to include or exclude the IDENTITY column
- SET @IDN = @Column_Name COLLATE DATABASE_DEFAULT
- ELSE
- GOTO SKIP_LOOP 
- END
+  --Exclude any specified columns in @cols_to_exclude
+  IF @cols_to_exclude IS NOT NULL AND CHARINDEX( '''' + SUBSTRING(@Column_Name COLLATE DATABASE_DEFAULT,2,LEN(@Column_Name COLLATE DATABASE_DEFAULT)-2) + '''',@cols_to_exclude COLLATE DATABASE_DEFAULT) <> 0 
+    GOTO SKIP_LOOP
+
+  --Include identity columns, unless the user has decided not to
+  IF @ommit_identity = 1 AND (SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsIdentity')) = 1
+    GOTO SKIP_LOOP
+
+  --Identity column? Capture the name
+  IF (SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsIdentity')) = 1 
+    SET @IDN = @Column_Name COLLATE DATABASE_DEFAULT
+
+  --Computed columns can't be inserted/updated, so exclude them unless directed otherwise
+  IF @ommit_computed_cols = 1 AND (SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsComputed')) = 1
+  BEGIN
+    IF @quiet = 0
+      PRINT 'Warning: The ' + @Column_Name + ' computed column will be excluded from the MERGE statement. Specify @ommit_computed_cols = 0 to include computed columns.'
+    GOTO SKIP_LOOP 
+  END
+
+  --GENERATED ALWAYS type columns can't be inserted/updated, so exclude them unless directed otherwise
+  IF @ommit_generated_always_cols = 1 AND ISNULL((SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'GeneratedAlwaysType')), 0) <> 0
+  BEGIN
+    IF @quiet = 0
+      PRINT 'Warning: The ' + @Column_Name + ' GENERATED ALWAYS column will be excluded from the MERGE statement. Specify @ommit_generated_always_cols = 0 to include GENERATED ALWAYS columns.'
+    GOTO SKIP_LOOP 
+  END
+
+  --Hash comparisons only: If the source table contains the @hash_compare_column, ensure that it is only included in the UPDATE clause once
+  IF @hash_compare_column IS NOT NULL AND @Column_Name = QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
+    SET @SourceHashColumn = 1
  
- --Making sure whether to output computed columns or not
- IF @ommit_computed_cols = 1
- BEGIN
- IF (SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'IsComputed')) = 1 
- BEGIN
-	 IF @quiet = 0
-		PRINT 'Warning: The ' + @Column_Name + ' computed column will be excluded from the MERGE statement. Specify @ommit_computed_cols = 0 to include computed columns.'
-	 GOTO SKIP_LOOP 
- END
- END
+  --Image columns are not currently supported. Throw an error if this is an image column and the user hasn't specified @ommit_images=1 yet
+  IF @Data_Type COLLATE DATABASE_DEFAULT = 'image'
+  BEGIN
+    IF (@ommit_images = 0)
+    BEGIN
+      RAISERROR('Tables with image columns are not supported.',16,1)
+      PRINT 'Use @ommit_images = 1 parameter to generate a MERGE for the rest of the columns.'
+      RETURN -1 --Failure. Reason: There is a column with image data type
+    END
+    ELSE
+    BEGIN
+      GOTO SKIP_LOOP
+    END
+  END
 
- --Skip this column if it is the GENERATED ALWAYS type, unless the user specifically wants those types of columns included
- IF @ommit_generated_always_cols = 1
- IF ISNULL((SELECT COLUMNPROPERTY( @Source_Table_Object_Id,SUBSTRING(@Column_Name,2,LEN(@Column_Name) - 2),'GeneratedAlwaysType')), 0) <> 0
- BEGIN
-	 IF @quiet = 0
-		PRINT 'Warning: The ' + @Column_Name + ' GENERATED ALWAYS column will be excluded from the MERGE statement. Specify @ommit_generated_always_cols = 0 to include GENERATED ALWAYS columns.'
- GOTO SKIP_LOOP 
- END
+  --Serialise the data in the appropriate way for the given column's data type, while preserving column precision and accommodating for NULL values.
+  SET @Actual_Values +=
+    CASE 
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('char','nchar')                                                          THEN 'COALESCE(''N'''''' + REPLACE(RTRIM(' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')'
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('varchar','nvarchar')                                                    THEN 'COALESCE(''N'''''' + REPLACE(' + @Column_Name + ','''''''','''''''''''')+'''''''',''NULL'')'
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('datetime','smalldatetime','datetime2','date', 'datetimeoffset', 'time') THEN 'COALESCE(''''''''  + RTRIM(CONVERT(char,' + @Column_Name + ',127))+'''''''',''NULL'')'
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('uniqueidentifier')                                                      THEN 'COALESCE(''N'''''' + REPLACE(CONVERT(char(36),RTRIM(' + @Column_Name + ')),'''''''','''''''''''')+'''''''',''NULL'')'
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('text')                                                                  THEN 'COALESCE(''N'''''' + REPLACE(CONVERT(varchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')'
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('ntext')                                                                 THEN 'COALESCE(''''''''  + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')'
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('xml')                                                                   THEN 'COALESCE(''''''''  + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')'
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('binary','varbinary')                                                    THEN 'COALESCE(RTRIM(CONVERT(varchar(max),' + @Column_Name + ', 1)),''NULL'')'
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('float','real','money','smallmoney')                                     THEN 'COALESCE(LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ',2)' + ')),''NULL'')'
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('hierarchyid')                                                           THEN 'COALESCE(''hierarchyid::Parse(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))+''''''''+'')'',''NULL'')'
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('geography')                                                             THEN 'COALESCE(''geography::STGeomFromText(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(nvarchar(max),' + @Column_Name + ')' + '))+''''''''+'', 4326)'',''NULL'')'
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('geometry')                                                              THEN 'COALESCE(''geometry::Parse(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(nvarchar(max),' + @Column_Name + ')' + '))+''''''''+'')'',''NULL'')'
+      ELSE                                                                                              'COALESCE(LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + ')),''NULL'')' 
+    END + '+' + ''',''' + ' + '
+  
+  --Add the column to the list to be serialised, unless it is the @hash_compare_column
+  IF @hash_compare_column IS NULL OR @Column_Name <> QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
+  BEGIN
+    SET @Column_List += @Column_Name + ','
+    DECLARE @Insert_Column_Spec NVARCHAR(128) = CASE WHEN @Data_Type COLLATE DATABASE_DEFAULT = 'xml' THEN N'CONVERT(xml, ' + @Column_Name + ')' ELSE @Column_Name END
+    SET @Column_List_Insert_Values += @Insert_Column_Spec + ','
+  END
 
- --make sure if source table already contains @hash_compare_column to avoid being doubled in UPDATE clause
- IF  @hash_compare_column IS NOT NULL AND @Column_Name = QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
- BEGIN
-	SET @SourceHashColumn = 1
- END
- 
- --Tables with columns of IMAGE data type are not supported for obvious reasons
- IF(@Data_Type COLLATE DATABASE_DEFAULT in ('image'))
- BEGIN
- IF (@ommit_images = 0)
- BEGIN
- RAISERROR('Tables with image columns are not supported.',16,1)
- PRINT 'Use @ommit_images = 1 parameter to generate a MERGE for the rest of the columns.'
- RETURN -1 --Failure. Reason: There is a column with image data type
- END
- ELSE
- BEGIN
- GOTO SKIP_LOOP
- END
- END
+  --Add the column to the list of columns to be updated, unless it is a primary key or identity column
+  IF NOT EXISTS
+  (
+    SELECT 1
+    FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk,
+         INFORMATION_SCHEMA.KEY_COLUMN_USAGE c
+    WHERE pk.TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
+    AND pk.TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
+    AND CONSTRAINT_TYPE = 'PRIMARY KEY'
+    AND c.TABLE_NAME = pk.TABLE_NAME
+    AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
+    AND c.CONSTRAINT_NAME = pk.CONSTRAINT_NAME
+    AND c.COLUMN_NAME = @Column_Name_Unquoted COLLATE DATABASE_DEFAULT
+  UNION
+    SELECT 1
+    FROM sys.identity_columns
+    WHERE OBJECT_SCHEMA_NAME(OBJECT_ID) = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
+    AND OBJECT_NAME(object_id) = @Internal_Table_Name COLLATE DATABASE_DEFAULT
+    AND name = @Column_Name_Unquoted COLLATE DATABASE_DEFAULT
+  )
+  BEGIN
+    DECLARE @Source_Column_Spec NVARCHAR(128) = CASE @Data_Type COLLATE DATABASE_DEFAULT WHEN 'xml' THEN N'CONVERT(xml, [Source].' + @Column_Name + ')' ELSE '[Source].' + @Column_Name END
+    SET @Column_List_For_Update += '[Target].' + @Column_Name + ' = ' + @Source_Column_Spec + ', ' + @b COLLATE DATABASE_DEFAULT + '  '
+    SET @Column_List_For_Check += @b COLLATE DATABASE_DEFAULT + CHAR(9) + 
+      CASE @Data_Type COLLATE DATABASE_DEFAULT
+        WHEN 'text'      THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL'
+        WHEN 'ntext'     THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL' 
+        WHEN 'xml'       THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL' 
+        WHEN 'geography' THEN '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geography::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0)'
+        WHEN 'geometry'  THEN '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geometry::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0)'
+        ELSE                  'NULLIF([Source].' + @Column_Name + ', [Target].' + @Column_Name + ') IS NOT NULL OR NULLIF([Target].' + @Column_Name + ', [Source].' + @Column_Name + ') IS NOT NULL'
+      END + ' OR '
+  END
 
- --Determining the data type of the column and depending on the data type, the VALUES part of
- --the MERGE statement is generated. Care is taken to handle columns with NULL values. Also
- --making sure, not to lose any data from flot, real, money, smallmomey, datetime columns
- SET @Actual_Values = @Actual_Values +
- CASE 
- WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('char','nchar') 
- THEN 
- 'COALESCE(''N'''''' + REPLACE(RTRIM(' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')'
- WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('varchar','nvarchar') 
- THEN 
- 'COALESCE(''N'''''' + REPLACE(' + @Column_Name + ','''''''','''''''''''')+'''''''',''NULL'')'
- WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('datetime','smalldatetime','datetime2','date', 'datetimeoffset', 'time') 
- THEN 
- 'COALESCE('''''''' + RTRIM(CONVERT(char,' + @Column_Name + ',127))+'''''''',''NULL'')'
- WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('uniqueidentifier') 
- THEN 
- 'COALESCE(''N'''''' + REPLACE(CONVERT(char(36),RTRIM(' + @Column_Name + ')),'''''''','''''''''''')+'''''''',''NULL'')'
- WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('text') 
- THEN 
- 'COALESCE(''N'''''' + REPLACE(CONVERT(varchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')' 
- WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('ntext') 
- THEN 
- 'COALESCE('''''''' + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')' 
- WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('xml') 
- THEN 
- 'COALESCE('''''''' + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')' 
- WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('binary','varbinary') 
- THEN 
- 'COALESCE(RTRIM(CONVERT(varchar(max),' + @Column_Name + ', 1)),''NULL'')' 
- WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('float','real','money','smallmoney')
- THEN
- 'COALESCE(LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ',2)' + ')),''NULL'')' 
- WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('hierarchyid')
- THEN 
-  'COALESCE(''hierarchyid::Parse(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))+''''''''+'')'',''NULL'')' 
- WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('geography')
- THEN
-  'COALESCE(''geography::STGeomFromText(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(nvarchar(max),' + @Column_Name + ')' + '))+''''''''+'', 4326)'',''NULL'')' 
- WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('geometry')
- THEN
-  'COALESCE(''geometry::Parse(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(nvarchar(max),' + @Column_Name + ')' + '))+''''''''+'')'',''NULL'')' 
- ELSE 
- 'COALESCE(LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + ')),''NULL'')' 
- END + '+' + ''',''' + ' + '
- 
- --Generating the column list for the MERGE statement
- SET @Column_List = @Column_List +  
- CASE WHEN @hash_compare_column IS NOT NULL AND @Column_Name = QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
- THEN ''
- ELSE @Column_Name + ',' END
- 
- SET @Column_List_Insert_Values = @Column_List_Insert_Values +  
- CASE WHEN @hash_compare_column IS NOT NULL AND @Column_Name = QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT) THEN ''
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('xml') THEN 'CONVERT(xml, ' + @Column_Name + '),'
- ELSE @Column_Name + ',' END
+  SKIP_LOOP: --The label used in GOTO
 
- --Don't update Primary Key or Identity columns
- IF NOT EXISTS(
- SELECT 1
- FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk ,
- INFORMATION_SCHEMA.KEY_COLUMN_USAGE c
- WHERE pk.TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
- AND pk.TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
- AND CONSTRAINT_TYPE = 'PRIMARY KEY'
- AND c.TABLE_NAME = pk.TABLE_NAME
- AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
- AND c.CONSTRAINT_NAME = pk.CONSTRAINT_NAME
- AND c.COLUMN_NAME = @Column_Name_Unquoted COLLATE DATABASE_DEFAULT
- UNION
- SELECT 1
- FROM sys.identity_columns
- WHERE OBJECT_SCHEMA_NAME(OBJECT_ID) = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
- AND OBJECT_NAME(object_id) = @Internal_Table_Name COLLATE DATABASE_DEFAULT
- AND name = @Column_Name_Unquoted COLLATE DATABASE_DEFAULT
- )
- BEGIN
- IF @Data_Type COLLATE DATABASE_DEFAULT = 'xml'  
-	SET @Column_List_For_Update = @Column_List_For_Update + '[Target].' + @Column_Name + ' = CONVERT(xml, [Source].' + @Column_Name + '), ' + @b COLLATE DATABASE_DEFAULT + '  '
- ELSE
-	SET @Column_List_For_Update = @Column_List_For_Update + '[Target].' + @Column_Name + ' = [Source].' + @Column_Name + ', ' + @b COLLATE DATABASE_DEFAULT + '  '
+  SET @Column_ID = (SELECT MIN(ORDINAL_POSITION) 
+                    FROM INFORMATION_SCHEMA.COLUMNS (NOLOCK) 
+                    WHERE TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
+                    AND TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
+                    AND ORDINAL_POSITION > @Column_ID)
 
- SET @Column_List_For_Check = @Column_List_For_Check +
- CASE @Data_Type COLLATE DATABASE_DEFAULT
- WHEN 'text' THEN @b COLLATE DATABASE_DEFAULT + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR '
- WHEN 'ntext' THEN @b COLLATE DATABASE_DEFAULT + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
- WHEN 'xml' THEN CHAR(10) + CHAR(9) + 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR ' 
- WHEN 'geography' THEN @b COLLATE DATABASE_DEFAULT + CHAR(9) + '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geography::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) OR '
- WHEN 'geometry' THEN @b COLLATE DATABASE_DEFAULT + CHAR(9) + '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geometry::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) OR '
- ELSE @b COLLATE DATABASE_DEFAULT + CHAR(9) + 'NULLIF([Source].' + @Column_Name + ', [Target].' + @Column_Name + ') IS NOT NULL OR NULLIF([Target].' + @Column_Name + ', [Source].' + @Column_Name + ') IS NOT NULL OR '
- END 
- END
-
- SKIP_LOOP: --The label used in GOTO
-
- SELECT @Column_ID = MIN(ORDINAL_POSITION) 
- FROM INFORMATION_SCHEMA.COLUMNS (NOLOCK) 
- WHERE TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
- AND TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
- AND ORDINAL_POSITION > @Column_ID
-
- END --Loop ends here!
+END --WHILE LOOP END
 
 
---To get rid of the extra characters that got concatenated during the last run through the loop
+--Get rid of the extra characters that got concatenated during the last run through the loop
 IF LEN(@Column_List_For_Update) <> 0
  BEGIN
  SET @Column_List_For_Update = ' ' + LEFT(@Column_List_For_Update,len(@Column_List_For_Update) - 2 - LEN(@b))
@@ -935,8 +886,15 @@ BEGIN
  SET @output += @b COLLATE DATABASE_DEFAULT + 'SELECT ' + @Merge_Error_Var_Name COLLATE DATABASE_DEFAULT + ' = @@ERROR'
  SET @output += @b COLLATE DATABASE_DEFAULT + 'SELECT ' + @Merge_Count_Var_Name COLLATE DATABASE_DEFAULT + ' = COUNT(1), ' + @Merge_CountIns_Var_Name COLLATE DATABASE_DEFAULT + ' = SUM(IIF([DMLAction] = ''INSERT'', 1, 0)), ' + @Merge_CountUpd_Var_Name COLLATE DATABASE_DEFAULT + ' = SUM(IIF([DMLAction] = ''UPDATE'', 1, 0)), ' + @Merge_CountDel_Var_Name COLLATE DATABASE_DEFAULT + ' = SUM (IIF([DMLAction] = ''DELETE'', 1, 0)) FROM ' + @Merge_Output_Var_Name COLLATE DATABASE_DEFAULT
  SET @output += @b COLLATE DATABASE_DEFAULT + 'IF ' + @Merge_Error_Var_Name COLLATE DATABASE_DEFAULT + ' != 0'
+ SET @output += @b COLLATE DATABASE_DEFAULT + ' BEGIN' 
  SET @output += @b COLLATE DATABASE_DEFAULT + ' PRINT ''ERROR OCCURRED IN MERGE FOR ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + '. Rows affected: '' + CAST('+ @Merge_Count_Var_Name COLLATE DATABASE_DEFAULT + ' AS VARCHAR(100)); -- SQL should always return zero rows affected';
+ SET @output += @b COLLATE DATABASE_DEFAULT + ' END'
+ SET @output += @b COLLATE DATABASE_DEFAULT + 'ELSE'
+ SET @output += @b COLLATE DATABASE_DEFAULT + ' BEGIN'
  SET @output += @b COLLATE DATABASE_DEFAULT + ' PRINT ''' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' rows affected by MERGE: '' + CAST(COALESCE(' + @Merge_Count_Var_Name COLLATE DATABASE_DEFAULT + ',0) AS VARCHAR(100)) + '' (Inserted: '' + CAST(COALESCE(' + @Merge_CountIns_Var_Name COLLATE DATABASE_DEFAULT + ',0) AS VARCHAR(100)) + ''; Updated: '' + CAST(COALESCE(' + @Merge_CountUpd_Var_Name COLLATE DATABASE_DEFAULT + ',0) AS VARCHAR(100)) + ''; Deleted: '' + CAST(COALESCE(' + @Merge_CountDel_Var_Name COLLATE DATABASE_DEFAULT + ',0) AS VARCHAR(100)) + '')'' ;'
+ SET @output += @b COLLATE DATABASE_DEFAULT + ' END'
+ SET @output += @b COLLATE DATABASE_DEFAULT + ISNULL(@batch_separator COLLATE DATABASE_DEFAULT, '')
+ SET @output += @b COLLATE DATABASE_DEFAULT + @b
 END
 
 --Re-enable the temporarily disabled constraints-------------------------------------
