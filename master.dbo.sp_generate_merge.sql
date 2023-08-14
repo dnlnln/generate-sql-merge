@@ -738,7 +738,7 @@ BEGIN
 	END
 END
 
-DECLARE @Output_Var_Suffix AS NVARCHAR(128) = CASE WHEN @batch_separator IS NULL THEN CAST(@Source_Table_Object_Id AS NVARCHAR(128)) ELSE '' END
+DECLARE @Output_Var_Suffix AS NVARCHAR(128) = CASE WHEN @batch_separator IS NULL THEN REPLACE(CAST(@Source_Table_Object_Id AS NVARCHAR(128)), '-', '') ELSE '' END
 DECLARE @Merge_Output_Var_Name AS NVARCHAR(128) = N'@mergeOutput' + @Output_Var_Suffix
 IF @include_rowsaffected = 1
 BEGIN
