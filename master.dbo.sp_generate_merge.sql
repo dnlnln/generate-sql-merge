@@ -378,7 +378,7 @@ SET @Column_List_For_Check = ''
 SET @Actual_Values = ''
 
 --Variable Defaults
-IF @target_table IS NOT NULL AND (@target_table LIKE '%.%' COLLATE DATABASE_DEFAULT OR @target_table LIKE '\[%\]'  COLLATE DATABASE_DEFAULT ESCAPE '\')
+IF @target_table IS NOT NULL AND (@target_table LIKE '%.%' COLLATE DATABASE_DEFAULT OR @target_table LIKE '\[%\]' COLLATE DATABASE_DEFAULT ESCAPE '\')
 BEGIN
  IF NOT @target_table LIKE '\[%\]' COLLATE DATABASE_DEFAULT ESCAPE '\'
  BEGIN
@@ -873,7 +873,7 @@ END
 --When NOT matched by target, perform an INSERT------------------------------------
 SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'WHEN NOT MATCHED BY TARGET THEN';
 SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' INSERT(' + @Column_List COLLATE DATABASE_DEFAULT + ')'
-SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' VALUES(' + REPLACE(@Column_List COLLATE DATABASE_DEFAULT, '[', '[Source].[') + ')'
+SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' VALUES(' + REPLACE(@Column_List_Insert_Values COLLATE DATABASE_DEFAULT, '[', '[Source].[') + ')'
 
 
 --When NOT matched by source, DELETE the row as required
