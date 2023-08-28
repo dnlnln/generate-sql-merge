@@ -807,8 +807,7 @@ BEGIN
  --Adding column @hash_compare_column to @ColumnList and @Column_List_For_Update if @hash_compare_column is not null
  IF @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL AND @SourceHashColumn = 0
  BEGIN
-	SET @Column_List_For_Update = @Column_List_For_Update COLLATE DATABASE_DEFAULT + ',' + @b COLLATE DATABASE_DEFAULT + '  [Target].[' + @hash_compare_column COLLATE DATABASE_DEFAULT +'] = [Source].[' + @hash_compare_column COLLATE DATABASE_DEFAULT +']'
-	SET @Column_List = @Column_List + ',[' + @hash_compare_column COLLATE DATABASE_DEFAULT + ']'
+  SET @Column_List_Insert_Values += ',' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
  END
  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'WHEN MATCHED ' + 
 	 CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL
