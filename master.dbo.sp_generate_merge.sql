@@ -93,6 +93,8 @@ ACKNOWLEDGEMENTS:
   Eitan Blumin** -- Added the ability to divide merges into multiple batches of x rows
   https://www.eitanblumin.com/
 
+LICENSE: See LICENSE file
+
 FURTHER INFO: See README.md
 
 GETTING STARTED:
