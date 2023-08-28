@@ -3,9 +3,9 @@ Generate SQL MERGE statements with Table data
 
 This system stored procedure takes a table name as a parameter and generates a `MERGE` statement containing all the table data. 
 
-This is useful if you need to [migrate static data between databases](https://documentation.red-gate.com/display/RR1/Static+Data#StaticData-offline), eg. the generated MERGE statement can be included in source control and used to deploy data between DEV/TEST/PROD.
+This is useful if you need to migrate static data between databases, eg. the generated MERGE statement can be included in source control and used to deploy data between DEV/TEST/PROD.
 
-The stored procedure itself is installed within the `[master]` database as a system object, allowing the proc to be called within the context of user databases (e.g. `EXEC Northwind.dbo.sp_generate_merge 'Region'`)
+The stored procedure itself is installed within the `[master]` database as a system object, allowing the proc to be called within the context of user databases (e.g. `EXEC MyDb.dbo.sp_generate_merge 'MyTable'`)
 
 Key features:
 
@@ -26,23 +26,36 @@ When the generated MERGE statement is executed, the following logic is applied b
 
 
 ## Use Cases
+The main use cases for which this tool was created to handle:
 - Generate statements for static data tables, store the .SQL file in source control/add it to a Visual Studio Database Project and use it as part of your Dev/Test/Prod deployments. The generated statements are re-runnable, so you can make changes to the file and easily migrate those changes between environments. 
 - Generate statements from your Production tables and then run those statements in your Dev/Test environments. Schedule this as part of a SQL Job to keep all of your environments in-sync. 
 - Enter test data into your Dev environment, and then generate statements from the Dev tables so that you can always reproduce your test database with valid sample data.
 
 
 ## Acknowledgements
-This procedure was adapted from **sp\_generate\_inserts**, written by Narayana Vyas Kondreddi (http://vyaskn.tripod.com). I made a number of attempts to get in touch with Vyas but unfortunately have not been able to reach him. No copyright infringement is intended and I will of course respect his wishes if asks for this to be removed.
 
-I would also like to acknowledge:
+- **Daniel Nolan** -- Creator/maintainer of sp_generate_merge https://danielnolan.io
 
-- Bill Graziano -- Blog post that provided the groundwork for MERGE statement generation
- (http://weblogs.sqlteam.com/billg/archive/2011/02/15/generate-merge-statements-from-a-table.aspx)
-- Bill Gibson  -- Blog post that detailed the static data table use case; the inspiration for this proc
- (http://blogs.msdn.com/b/ssdt/archive/2012/02/02/including-data-in-an-sql-server-database-project.aspx)
-- Nathan Skerl -- Provided a novel way of working around the 8000 character limit in SSMS
- (http://stackoverflow.com/a/10489767/266882)
+- **Narayana Vyas Kondreddi** -- Author of `sp_generate_inserts`**, from which `sp_generate_merge` was originally forked (sp_generate_inserts: Copyright © 2002 Narayana Vyas Kondreddi. All rights reserved.) http://vyaskn.tripod.com/code
+
+- **Bill Gibson** -- Blog that detailed the static data table use case; the inspiration for this proc
+ http://blogs.msdn.com/b/ssdt/archive/2012/02/02/including-data-in-an-sql-server-database-project.aspx
  
+- **Bill Graziano** -- Blog that provided the groundwork for MERGE statement generation
+ http://weblogs.sqlteam.com/billg/archive/2011/02/15/generate-merge-statements-from-a-table.aspx 
+
+- **Christian Lorber** -- Contributed hashvalue-based change detection that enables efficient ETL implementations
+ https://twitter.com/chlorber
+
+- **Nathan Skerl** -- StackOverflow answer that provided a workaround for the output truncation problem
+ http://stackoverflow.com/a/10489767/266882
+
+- **Eitan Blumin** -- Added the ability to divide merges into multiple batches of x rows
+ https://www.eitanblumin.com/
+
+**This procedure was adapted from `sp_generate_inserts`, written by [Narayana Vyas Kondreddi](http://vyaskn.tripod.com). I made a number of attempts to get in touch with Vyas to get his blessing for this fork -- given that no license details are specified in his code -- but was unfortunately unable to reach him. No copyright infringement is intended.
+
+
  
 ## Installation
 Simply execute the script, which will install it in `[master]` database as a system procedure (making it executable within user databases).
@@ -51,9 +64,9 @@ Simply execute the script, which will install it in `[master]` database as a sys
 ## Known Limitations
 This procedure has explicit support for the following datatypes: (small)datetime(2), datetimeoffset, (n)varchar, (n)text, (n)char, xml, int, float, real, (small)money, timestamp, rowversion, uniqueidentifier, (var)binary, hierarchyid, geometry and geography. All others are implicitly converted to their CHAR representations so YMMV depending on the datatype.
 
-The Image datatype is not supported and an error will be thrown if these are not excluded using the `@cols_to_exclude` parameter.
+The `image` datatype is not supported and an error will be thrown if these are not excluded using the `@cols_to_exclude` parameter.
 
-When using the `@hash_compare_column` parameter, all columns in the source and target table must be implicitly convertible to strings (due to the use of `CONCAT` in the proc to calculate the hash value). This means that the following data types are not supported with `@hash_compare_column`: xml, hierarchyid, geometry and geography.
+When using the `@hash_compare_column` parameter, all columns in the source and target table must be implicitly convertible to strings (due to the use of `CONCAT` in the proc to calculate the hash value). This means that the following data types are not supported with `@hash_compare_column`: xml, hierarchyid, image, geometry and geography.
 
 
 ## Usage

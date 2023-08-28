@@ -50,155 +50,148 @@ AS
 BEGIN
 
 /***********************************************************************************************************
-Procedure: sp_generate_merge
- (Adapted by Daniel Nolan for SQL Server 2008+)
+PROCEDURE: sp_generate_merge  
 
-Adapted from: sp_generate_inserts (Build 22) 
- (Copyright © 2002 Narayana Vyas Kondreddi. All rights reserved.)
+GITHUB PROJECT: https://github.com/dnlnln/generate-sql-merge
 
-Purpose: To generate a MERGE statement from existing data, which will INSERT/UPDATE/DELETE data based
- on matching primary key values in the source/target table.
+PURPOSE: Generates a MERGE statement from a table which will INSERT/UPDATE/DELETE data 
+         based on matching primary key values in the source/target table. The generated statements 
+         can be executed to replicate the data in some other location.
  
- The generated statements can be executed to replicate the data in some other location.
+USE CASES:
+  - Generate statements for static data tables, store the .SQL file in source control and use 
+    it as part of your Dev/Test/Prod deployment. The generated statements are re-runnable, so 
+    you can make changes to the file and migrate those changes between environments.
+
+  - Generate statements from your Production tables and then run those statements in your 
+    Dev/Test environments. Schedule this as part of a SQL Job to keep all of your environments
+    in-sync.
+
+  - Enter test data into your Dev environment, and then generate statements from the Dev
+    tables so that you can always reproduce your test database with valid sample data.
  
- Typical use cases:
- * Generate statements for static data tables, store the .SQL file in source control and use 
- it as part of your Dev/Test/Prod deployment. The generated statements are re-runnable, so 
- you can make changes to the file and migrate those changes between environments.
- 
- * Generate statements from your Production tables and then run those statements in your 
- Dev/Test environments. Schedule this as part of a SQL Job to keep all of your environments 
- in-sync.
- 
- * Enter test data into your Dev environment, and then generate statements from the Dev
- tables so that you can always reproduce your test database with valid sample data.
- 
+ACKNOWLEDGEMENTS:
+  Daniel Nolan -- Creator/maintainer of sp_generate_merge
+  https://danielnolan.io
 
-Written by: Narayana Vyas Kondreddi
- http://vyaskn.tripod.com/code
+  Narayana Vyas Kondreddi -- Author of sp_generate_inserts, from which this proc was originally forked
+  (sp_generate_inserts: Copyright © 2002 Narayana Vyas Kondreddi. All rights reserved.)
+  http://vyaskn.tripod.com/code
 
- Daniel Nolan
- https://danielnolan.io
+  Bill Gibson -- Blog that detailed the static data table use case; the inspiration for this proc
+  http://blogs.msdn.com/b/ssdt/archive/2012/02/02/including-data-in-an-sql-server-database-project.aspx
 
+  Bill Graziano -- Blog that provided the groundwork for MERGE statement generation
+  http://weblogs.sqlteam.com/billg/archive/2011/02/15/generate-merge-statements-from-a-table.aspx 
 
+  Christian Lorber -- Contributed hashvalue-based change detection that enables efficient ETL implementations
+  https://twitter.com/chlorber
 
-Acknowledgements (sp_generate_merge):
- Christian Lorber -- Contributed hashvalue-based change detection that enables efficient ETL implementations
- https://twitter.com/chlorber
+  Nathan Skerl -- StackOverflow answer that provided a workaround for the output truncation problem
+  http://stackoverflow.com/a/10489767/266882
 
- Nathan Skerl -- StackOverflow answer that provided a workaround for the output truncation problem
- http://stackoverflow.com/a/10489767/266882
+  Eitan Blumin** -- Added the ability to divide merges into multiple batches of x rows
+  https://www.eitanblumin.com/
 
- Bill Gibson -- Blog that detailed the static data table use case; the inspiration for this proc
- http://blogs.msdn.com/b/ssdt/archive/2012/02/02/including-data-in-an-sql-server-database-project.aspx
- 
- Bill Graziano -- Blog that provided the groundwork for MERGE statement generation
- http://weblogs.sqlteam.com/billg/archive/2011/02/15/generate-merge-statements-from-a-table.aspx 
+FURTHER INFO: See README.md
 
-Acknowledgements (sp_generate_inserts):
- Divya Kalra -- For beta testing
- Mark Charsley -- For reporting a problem with scripting uniqueidentifier columns with NULL values
- Artur Zeygman -- For helping me simplify a bit of code for handling non-dbo owned tables
- Joris Laperre -- For reporting a regression bug in handling text/ntext columns
+GETTING STARTED:
+  Ensure that your SQL client is configured to send results to grid (default SSMS behaviour).
+  This ensures that the generated MERGE statement can be output in full, getting around SSMS's 4000 nchar limit.
+  After running this proc, click the hyperlink within the single row returned to copy the generated MERGE statement.
 
-NOTE: Results can be unpredictable with huge text columns or SQL Server 2000's sql_variant data types
-
-Get Started: Ensure that your SQL client is configured to send results to grid (default SSMS behaviour).
-This ensures that the generated MERGE statement can be output in full, getting around SSMS's 4000 nchar limit.
-After running this proc, click the hyperlink within the single row returned to copy the generated MERGE statement.
-
+USAGE EXAMPLES:
 Example 1: To generate a MERGE statement for table 'titles':
  
- EXEC sp_generate_merge 'titles'
+  EXEC sp_generate_merge 'titles'
 
 Example 2: To generate a MERGE statement for 'titlesCopy' table from 'titles' table:
 
- EXEC sp_generate_merge 'titles', 'titlesCopy'
+  EXEC sp_generate_merge 'titles', 'titlesCopy'
 
 Example 3: To generate a MERGE statement for table 'titles' that will unconditionally UPDATE matching rows 
  (ie. not perform a "has data changed?" check prior to going ahead with an UPDATE):
  
- EXEC sp_generate_merge 'titles', @update_only_if_changed = 0
+  EXEC sp_generate_merge 'titles', @update_only_if_changed = 0
 
-Example 4: To generate a MERGE statement for 'titles' table for only those titles 
- which contain the word 'Computer' in them:
- NOTE: Do not complicate the FROM or WHERE clause here. It's assumed that you are good with T-SQL if you are using this parameter
+Example 4: To generate a MERGE statement for 'titles' table for only those titles which contain the word 'Computer' in them:
+ Note: Do not complicate the FROM or WHERE clause here. It's assumed that you are good with T-SQL if you are using this parameter
 
- EXEC sp_generate_merge 'titles', @from = "from titles where title like '%Computer%' order by title_id"
+  EXEC sp_generate_merge 'titles', @from = "from titles where title like '%Computer%' order by title_id"
 
-Example 5: To print the debug information:
+Example 5: To print diagnostic info during execution of this proc:
 
- EXEC sp_generate_merge 'titles', @debug_mode = 1
+  EXEC sp_generate_merge 'titles', @debug_mode = 1
 
-Example 6: If the table is in a different schema to the default, use @schema parameter to specify the schema name
- To use this option, you must have SELECT permissions on that table
+Example 6: If the table is in a different schema to the default eg. `Contact.AddressType`:
 
- EXEC sp_generate_merge 'Nickstable', @schema = 'Nick'
+  EXEC sp_generate_merge 'AddressType', @schema = 'Contact'
 
-Example 7: To generate a MERGE statement for the rest of the columns excluding images
+Example 7: To generate a MERGE statement for the rest of the columns excluding those of the `image` data type:
 
- EXEC sp_generate_merge 'imgtable', @ommit_images = 1
+  EXEC sp_generate_merge 'imgtable', @ommit_images = 1
 
 Example 8: To generate a MERGE statement excluding (omitting) IDENTITY columns:
  (By default IDENTITY columns are included in the MERGE statement)
 
- EXEC sp_generate_merge 'mytable', @ommit_identity = 1
+  EXEC sp_generate_merge 'mytable', @ommit_identity = 1
 
 Example 9: To generate a MERGE statement for the TOP 10 rows in the table:
  
- EXEC sp_generate_merge 'mytable', @top = 10
+  EXEC sp_generate_merge 'mytable', @top = 10
 
 Example 10: To generate a MERGE statement with only those columns you want:
  
- EXEC sp_generate_merge 'titles', @cols_to_include = "'title','title_id','au_id'"
+  EXEC sp_generate_merge 'titles', @cols_to_include = "'title','title_id','au_id'"
 
 Example 11: To generate a MERGE statement by omitting certain columns:
  
- EXEC sp_generate_merge 'titles', @cols_to_exclude = "'title','title_id','au_id'"
+  EXEC sp_generate_merge 'titles', @cols_to_exclude = "'title','title_id','au_id'"
 
 Example 12: To avoid checking the foreign key constraints while loading data with a MERGE statement:
  
- EXEC sp_generate_merge 'titles', @disable_constraints = 1
+  EXEC sp_generate_merge 'titles', @disable_constraints = 1
 
 Example 13: To exclude computed columns from the MERGE statement:
 
- EXEC sp_generate_merge 'MyTable', @ommit_computed_cols = 1
+  EXEC sp_generate_merge 'MyTable', @ommit_computed_cols = 1
 
 Example 14: To generate a MERGE statement for a table that lacks a primary key:
  
- EXEC sp_generate_merge 'StateProvince', @schema = 'Person', @cols_to_join_on = "'StateProvinceCode'"
+  EXEC sp_generate_merge 'StateProvince', @schema = 'Person', @cols_to_join_on = "'StateProvinceCode'"
 
 Example 15: To generate a statement that MERGEs data directly from the source table to a table in another database:
 
-EXEC sp_generate_merge 'StateProvince', @schema = 'Person', @include_values = 0, @target_table = '[OtherDb].[Person].[StateProvince]'
+  EXEC sp_generate_merge 'StateProvince', @schema = 'Person', @include_values = 0, @target_table = '[OtherDb].[Person].[StateProvince]'
 
 Example 16: To generate a MERGE statement that will update the target table if the calculated hash value of the source does not match the [Hashvalue] column in the target:
 
-EXEC [DB].dbo.[sp_generate_merge] 
-@schema = 'Person', 
-@target_table = '[DB].[Person].[StateProvince]', 
-@table_name = 'v_StateProvince',
-@include_values = 0,   
-@hash_compare_column = 'Hashvalue',
-@include_rowsaffected = 0,
-@nologo = 1,
-@cols_to_join_on = "'ID'"
+  EXEC [DB].dbo.[sp_generate_merge] 
+  @schema = 'Person', 
+  @target_table = '[DB].[Person].[StateProvince]', 
+  @table_name = 'v_StateProvince',
+  @include_values = 0,   
+  @hash_compare_column = 'Hashvalue',
+  @include_rowsaffected = 0,
+  @nologo = 1,
+  @cols_to_join_on = "'ID'"
 
 Example 17: To generate and immediately execute a MERGE statement that performs an ETL from a table in one database to another:
 
-DECLARE @sql NVARCHAR(MAX)
-EXEC [AdventureWorks2017].dbo.sp_generate_merge @output = @sql output, @results_to_text = null, @schema = 'Person', @table_name = 'AddressType', @include_values = 0, @include_use_db = 0, @batch_separator = null, @target_table = '[AdventureWorks2017_Target].[Person].[AddressType]'
-EXEC [AdventureWorks2017].dbo.sp_executesql @sql
+  DECLARE @sql NVARCHAR(MAX)
+  EXEC [AdventureWorks2017].dbo.sp_generate_merge @output = @sql output, @results_to_text = null, @schema = 'Person', @table_name = 'AddressType', @include_values = 0, @include_use_db = 0, @batch_separator = null, @target_table = '[AdventureWorks2017_Target].[Person].[AddressType]'
+  EXEC [AdventureWorks2017].dbo.sp_executesql @sql
 
 Example 18: To generate a MERGE that works with a subset of data from the source table only (e.g. will only INSERT/UPDATE rows that meet certain criteria, and not delete unmatched rows):
 
-SELECT * INTO #CurrencyRateFiltered FROM AdventureWorks2017.Sales.CurrencyRate WHERE ToCurrencyCode = 'AUD';
-ALTER TABLE #CurrencyRateFiltered ADD CONSTRAINT PK_Sales_CurrencyRate PRIMARY KEY CLUSTERED ( CurrencyRateID )
-EXEC tempdb.dbo.sp_generate_merge @table_name='#CurrencyRateFiltered', @target_table='[AdventureWorks2017].[Sales].[CurrencyRate]', @delete_if_not_matched = 0, @include_use_db = 0;
+  SELECT * INTO #CurrencyRateFiltered FROM AdventureWorks2017.Sales.CurrencyRate WHERE ToCurrencyCode = 'AUD';
+  ALTER TABLE #CurrencyRateFiltered ADD CONSTRAINT PK_Sales_CurrencyRate PRIMARY KEY CLUSTERED ( CurrencyRateID )
+  EXEC tempdb.dbo.sp_generate_merge @table_name='#CurrencyRateFiltered', @target_table='[AdventureWorks2017].[Sales].[CurrencyRate]', @delete_if_not_matched = 0, @include_use_db = 0;
 
-Example 19: To generate a MERGE split into batches based on a max rowcount per batch. NOTE: @delete_if_not_matched must be 0, and @include_values must be 1.
+Example 19: To generate a MERGE split into batches based on a max rowcount per batch:
+  Note: @delete_if_not_matched must be 0, and @include_values must be 1
 
-EXEC [AdventureWorks2017].dbo.[sp_generate_merge] @table_name = 'MyTable', @schema = 'dbo', @delete_if_not_matched = 0, @max_rows_per_batch = 100
+  EXEC [AdventureWorks2017].dbo.[sp_generate_merge] @table_name = 'MyTable', @schema = 'dbo', @delete_if_not_matched = 0, @max_rows_per_batch = 100
  
 ***********************************************************************************************************/
 
@@ -657,9 +650,8 @@ IF @include_use_db = 1
 
 IF @nologo = 0 AND @quiet = 0
  BEGIN
- SET @output += @b COLLATE DATABASE_DEFAULT + '--MERGE generated by ''sp_generate_merge'' stored procedure'
- SET @output += @b COLLATE DATABASE_DEFAULT + '--Originally by Vyas (http://vyaskn.tripod.com/code): sp_generate_inserts (build 22)'
- SET @output += @b COLLATE DATABASE_DEFAULT + '--Adapted for SQL Server 2008+ by Daniel Nolan (https://twitter.com/dnlnln)'
+ SET @output += @b COLLATE DATABASE_DEFAULT + '--MERGE generated by sp_generate_merge proc tool maintained by Daniel Nolan (https://danielnolan.io)'
+ SET @output += @b COLLATE DATABASE_DEFAULT + '--Originally forked from Vyas'' sp_generate_inserts (http://vyaskn.tripod.com/code)'
  SET @output += @b COLLATE DATABASE_DEFAULT + ''
  END
 
