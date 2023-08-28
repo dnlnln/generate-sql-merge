@@ -350,7 +350,7 @@ DECLARE @Column_ID int,
  END		
  SET @SQL =
 	'SELECT @columnname = column_name
-	FROM ' + COALESCE(PARSENAME(@target_table COLLATE DATABASE_DEFAULT,3),DB_NAME()) + '.INFORMATION_SCHEMA.COLUMNS (NOLOCK)
+	FROM ' + COALESCE(PARSENAME(@target_table COLLATE DATABASE_DEFAULT,3),QUOTENAME(DB_NAME())) + '.INFORMATION_SCHEMA.COLUMNS (NOLOCK)
 	WHERE TABLE_NAME = ''' + PARSENAME(@target_table COLLATE DATABASE_DEFAULT,1) + '''' +
 	' AND TABLE_SCHEMA = ' + '''' + COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME()) + '''' + ' AND [COLUMN_NAME] = ''' + @hash_compare_column COLLATE DATABASE_DEFAULT + ''''
 
@@ -650,7 +650,7 @@ IF @debug_mode = 1 AND @quiet = 0
 IF @include_use_db = 1
  BEGIN
 	SET @output += @b 
-	SET @output += @b COLLATE DATABASE_DEFAULT + 'USE [' + DB_NAME() + ']'
+	SET @output += @b COLLATE DATABASE_DEFAULT + 'USE ' + QUOTENAME(DB_NAME())
 	SET @output += @b COLLATE DATABASE_DEFAULT + ISNULL(@batch_separator, '')
 	SET @output += @b 
  END
