@@ -358,7 +358,7 @@ DECLARE @Column_ID int,
 	IF @checkhashcolumn IS NULL
 	BEGIN
 	  RAISERROR('Column %s not found ',16,1, @hash_compare_column)
-	  PRINT 'The specified @hash_compare_column [' + @hash_compare_column COLLATE DATABASE_DEFAULT +  '] does not exist in ' + QUOTENAME(@target_table COLLATE DATABASE_DEFAULT) + '. Please make sure that [' + @hash_compare_column COLLATE DATABASE_DEFAULT + '] VARBINARY (8000) exits in the target table'
+	  PRINT 'The specified @hash_compare_column ' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT) +  ' does not exist in ' + QUOTENAME(@target_table COLLATE DATABASE_DEFAULT) + '. Please make sure that ' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT) + ' VARBINARY (8000) exits in the target table'
 	  RETURN -1 --Failure. Reason: There is no column that can be used as the basis of Hashcompare
 	END	
 
@@ -808,10 +808,12 @@ BEGIN
  IF @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL AND @SourceHashColumn = 0
  BEGIN
   SET @Column_List_Insert_Values += ',' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
+	SET @Column_List_For_Update += ',' + @b COLLATE DATABASE_DEFAULT + '  [Target].' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT) +' = [Source].' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
+	SET @Column_List += ',' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
  END
- SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'WHEN MATCHED ' + 
+ SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'WHEN MATCHED ' +
 	 CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL
-	 THEN 'AND ([Target].[' + @hash_compare_column +'] <> [Source].[' + @hash_compare_column +'] OR [Target].[' + @hash_compare_column + '] IS NULL) ' 
+	 THEN 'AND ([Target].' + QUOTENAME(@hash_compare_column) +' <> [Source].' + QUOTENAME(@hash_compare_column) + ' OR [Target].' + QUOTENAME(@hash_compare_column) + ' IS NULL) '
 	 ELSE CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NULL THEN
 	 'AND (' + @Column_List_For_Check + ') ' ELSE '' END END + 'THEN'
  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' UPDATE SET'
