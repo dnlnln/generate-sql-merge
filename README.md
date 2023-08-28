@@ -103,3 +103,115 @@ SET NOCOUNT OFF
 GO
 ```
 
+## Additional examples
+
+#### Example 1: To generate a MERGE statement for table 'titles':
+```
+EXEC sp_generate_merge 'titles'
+```
+
+#### Example 2: To generate a MERGE statement for 'titlesCopy' table from 'titles' table:
+```
+EXEC sp_generate_merge 'titles', 'titlesCopy'
+```
+
+#### Example 3: To generate a MERGE statement for table 'titles' that will unconditionally UPDATE matching rows 
+ (ie. not perform a "has data changed?" check prior to going ahead with an UPDATE):
+```
+EXEC sp_generate_merge 'titles', @update_only_if_changed = 0
+```
+
+#### Example 4: To generate a MERGE statement for 'titles' table for only those titles which contain the word 'Computer' in them
+Note: Do not complicate the FROM or WHERE clause here. It's assumed that you are good with T-SQL if you are using this parameter
+```
+EXEC sp_generate_merge 'titles', @from = "from titles where title like '%Computer%' order by title_id"
+```
+
+#### Example 5: To print diagnostic info during execution of this proc:
+```
+EXEC sp_generate_merge 'titles', @debug_mode = 1
+```
+
+#### Example 6: If the table is in a different schema to the default eg. `Contact.AddressType`:
+```
+EXEC sp_generate_merge 'AddressType', @schema = 'Contact'
+```
+
+#### Example 7: To generate a MERGE statement for the rest of the columns excluding those of the `image` data type:
+```
+EXEC sp_generate_merge 'imgtable', @ommit_images = 1
+```
+
+#### Example 8: To generate a MERGE statement excluding (omitting) IDENTITY columns:
+ (By default IDENTITY columns are included in the MERGE statement)
+```
+EXEC sp_generate_merge 'mytable', @ommit_identity = 1
+```
+
+#### Example 9: To generate a MERGE statement for the TOP 10 rows in the table:
+```
+EXEC sp_generate_merge 'mytable', @top = 10
+```
+
+#### Example 10: To generate a MERGE statement with only those columns you want:
+```
+EXEC sp_generate_merge 'titles', @cols_to_include = "'title','title_id','au_id'"
+```
+
+#### Example 11: To generate a MERGE statement by omitting certain columns:
+```
+EXEC sp_generate_merge 'titles', @cols_to_exclude = "'title','title_id','au_id'"
+```
+
+#### Example 12: To avoid checking the foreign key constraints while loading data with a MERGE statement:
+```
+EXEC sp_generate_merge 'titles', @disable_constraints = 1
+```
+
+#### Example 13: To exclude computed columns from the MERGE statement:
+```
+EXEC sp_generate_merge 'MyTable', @ommit_computed_cols = 1
+```
+
+#### Example 14: To generate a MERGE statement for a table that lacks a primary key:
+```
+EXEC sp_generate_merge 'StateProvince', @schema = 'Person', @cols_to_join_on = "'StateProvinceCode'"
+```
+
+#### Example 15: To generate a statement that MERGEs data directly from the source table to a table in another database:
+```
+EXEC sp_generate_merge 'StateProvince', @schema = 'Person', @include_values = 0, @target_table = '[OtherDb].[Person].[StateProvince]'
+```
+
+#### Example 16: To generate a MERGE statement that will update the target table if the calculated hash value of the source does not match the `Hashvalue` column in the target:
+```
+EXEC [DB].dbo.[sp_generate_merge] 
+  @schema = 'Person', 
+  @target_table = '[DB].[Person].[StateProvince]', 
+  @table_name = 'v_StateProvince',
+  @include_values = 0,   
+  @hash_compare_column = 'Hashvalue',
+  @include_rowsaffected = 0,
+  @nologo = 1,
+  @cols_to_join_on = "'ID'"
+```
+
+#### Example 17: To generate and immediately execute a MERGE statement that performs an ETL from a table in one database to another:
+```
+DECLARE @sql NVARCHAR(MAX)
+EXEC [AdventureWorks2017].dbo.sp_generate_merge @output = @sql output, @results_to_text = null, @schema = 'Person', @table_name = 'AddressType', @include_values = 0, @include_use_db = 0, @batch_separator = null, @target_table = '[AdventureWorks2017_Target].[Person].[AddressType]'
+EXEC [AdventureWorks2017].dbo.sp_executesql @sql
+```
+
+#### Example 18: To generate a MERGE that works with a subset of data from the source table only (e.g. will only INSERT/UPDATE rows that meet certain criteria, and not delete unmatched rows):
+```
+SELECT * INTO #CurrencyRateFiltered FROM AdventureWorks2017.Sales.CurrencyRate WHERE ToCurrencyCode = 'AUD';
+ALTER TABLE #CurrencyRateFiltered ADD CONSTRAINT PK_Sales_CurrencyRate PRIMARY KEY CLUSTERED ( CurrencyRateID )
+EXEC tempdb.dbo.sp_generate_merge @table_name='#CurrencyRateFiltered', @target_table='[AdventureWorks2017].[Sales].[CurrencyRate]', @delete_if_not_matched = 0, @include_use_db = 0;
+```
+
+#### Example 19: To generate a MERGE split into batches based on a max rowcount per batch:
+Note: `@delete_if_not_matched` must be `0`, and `@include_values` must be `1`.
+```
+EXEC [AdventureWorks2017].dbo.[sp_generate_merge] @table_name = 'MyTable', @schema = 'dbo', @delete_if_not_matched = 0, @max_rows_per_batch = 100
+```
