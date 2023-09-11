@@ -1,21 +1,37 @@
 SET NOCOUNT ON
 SET QUOTED_IDENTIFIER ON
 
-PRINT 'Using [master] database'
-GO
-USE [master]
-IF OBJECT_ID('sp_generate_merge', 'P') IS NOT NULL
+IF OBJECT_ID('sp_MS_marksystemobject', 'P') IS NOT NULL
 BEGIN
-  PRINT 'Dropping the existing procedure and re-creating it...'
-  DROP PROC [sp_generate_merge]
+  -- Install the proc on SQL Server Standard/Developer/Express/Enterprise
+  PRINT 'Installing sp_generate_merge as a system stored procedure in [master] database'
+  IF DB_NAME() != 'master'
+  BEGIN
+    RAISERROR ('Wrong database context. Please USE [master] to allow sp_generate_merge to be installed as a system stored procedure.', 16, 1)
+    SET NOEXEC ON
+  END
 END
 ELSE
 BEGIN
-  PRINT 'Creating the stored procedure...'
+  -- Install the proc on Azure SQL/Managed Instance
+  IF DB_NAME() = 'master'
+  BEGIN
+    RAISERROR ('Cannot install sp_generate_merge in master DB as system stored procedures cannot be created on this edition of SQL Server (i.e. Azure SQL or Managed Instance). Please install this proc in a user database instead.', 16, 1)
+    SET NOEXEC ON
+  END
+  ELSE
+  BEGIN
+    PRINT 'Warning: As this edition of SQL Server (i.e. Azure SQL or Managed Instance) does not allow system stored procedures to be created, sp_generate_merge will be installed within the current database context only: ' + QUOTENAME(DB_NAME())
+  END
 END
 GO
 
---Turn system object marking on
+IF OBJECT_ID('sp_generate_merge', 'P') IS NOT NULL
+BEGIN
+  PRINT 'Dropping the existing procedure to allow it to be re-created'
+  DROP PROC [sp_generate_merge]
+END
+GO
 
 CREATE PROC [sp_generate_merge]
 (
@@ -944,16 +960,19 @@ BEGIN
 END
 
 SET NOCOUNT OFF
-RETURN 0 --Success. We are done!
+RETURN 0
 END
 GO
 
-PRINT 'Adding system object flag to allow procedure to be used within all databases'
+IF OBJECT_ID('sp_MS_marksystemobject', 'P') IS NOT NULL AND DB_NAME() = 'master'
+BEGIN
+  PRINT 'Adding system object flag to allow procedure to be used within all databases'
+  EXEC sp_MS_marksystemobject 'sp_generate_merge'
+END
 GO
-EXEC sp_MS_marksystemobject 'sp_generate_merge'
-
 PRINT 'Granting EXECUTE permission on stored procedure to all users'
 GO
 GRANT EXEC ON [sp_generate_merge] TO [public]
 SET NOCOUNT OFF
+SET NOEXEC OFF
 GO
