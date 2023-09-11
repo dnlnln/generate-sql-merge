@@ -1,4 +1,5 @@
 SET NOCOUNT ON
+SET QUOTED_IDENTIFIER ON
 GO
 
 PRINT 'Using Master database'
@@ -198,7 +199,7 @@ Example 19: To generate a MERGE split into batches based on a max rowcount per b
 ***********************************************************************************************************/
 
 SET NOCOUNT ON
-
+SET QUOTED_IDENTIFIER ON
 
 --Making sure user only uses either @cols_to_include or @cols_to_exclude
 IF ((@cols_to_include IS NOT NULL) AND (@cols_to_exclude IS NOT NULL))
