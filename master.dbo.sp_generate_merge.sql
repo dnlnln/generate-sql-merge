@@ -1,17 +1,18 @@
 SET NOCOUNT ON
 SET QUOTED_IDENTIFIER ON
-GO
 
-PRINT 'Using Master database'
-USE master
+PRINT 'Using [master] database'
 GO
-
-PRINT 'Checking for the existence of this procedure'
-IF (SELECT OBJECT_ID('sp_generate_merge','P')) IS NOT NULL --means, the procedure already exists
- BEGIN
- PRINT 'Procedure already exists. So, dropping it'
- DROP PROC sp_generate_merge
- END
+USE [master]
+IF OBJECT_ID('sp_generate_merge', 'P') IS NOT NULL
+BEGIN
+  PRINT 'Dropping the existing procedure and re-creating it...'
+  DROP PROC [sp_generate_merge]
+END
+ELSE
+BEGIN
+  PRINT 'Creating the stored procedure...'
+END
 GO
 
 --Turn system object marking on
@@ -945,21 +946,14 @@ END
 SET NOCOUNT OFF
 RETURN 0 --Success. We are done!
 END
-
 GO
 
-PRINT 'Created the procedure'
+PRINT 'Adding system object flag to allow procedure to be used within all databases'
 GO
+EXEC sp_MS_marksystemobject 'sp_generate_merge'
 
-
---Mark the proc as a system object to allow it to be called transparently from other databases
-EXEC sp_MS_marksystemobject sp_generate_merge
+PRINT 'Granting EXECUTE permission on stored procedure to all users'
 GO
-
-PRINT 'Granting EXECUTE permission on sp_generate_merge to all users'
-GRANT EXEC ON sp_generate_merge TO public
-
+GRANT EXEC ON [sp_generate_merge] TO [public]
 SET NOCOUNT OFF
 GO
-
-PRINT 'Done'
