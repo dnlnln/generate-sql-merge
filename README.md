@@ -33,7 +33,7 @@ The main use cases for which this tool was created to handle:
 
 
 ## Installation:
-Simply execute `master.dbo.sp_generate_merge.sql` to install the proc.
+Simply execute `sp_generate_merge.sql` to install the proc.
 #### Where is the proc installed?
 
 - **OnPremise editions** (SQL Server Standard/Developer/Express/Enterprise):
