@@ -5,7 +5,7 @@ This system stored procedure takes a table name as a parameter and generates a `
 
 This is useful if you need to migrate static data between databases, eg. the generated MERGE statement can be included in source control and used to deploy data between DEV/TEST/PROD.
 
-The stored procedure itself is installed within the `[master]` database as a system object, allowing the proc to be called within the context of user databases (e.g. `EXEC MyDb.dbo.sp_generate_merge 'MyTable'`)
+The stored procedure itself is installed within the `[master]` database as a system object, allowing the proc to be called within the context of user databases (e.g. `EXEC MyDb..sp_generate_merge 'MyTable'`)
 
 Key features:
 
@@ -32,6 +32,26 @@ The main use cases for which this tool was created to handle:
 - Enter test data into your Dev environment, and then generate statements from the Dev tables so that you can always reproduce your test database with valid sample data.
 
 
+## Installation:
+Simply execute `master.dbo.sp_generate_merge.sql` to install the proc.
+#### Where is the proc installed?
+
+- **OnPremise editions** (SQL Server Standard/Developer/Express/Enterprise):
+  Installs into `master` as a system stored procedure, allowing any authenticated users to execute the proc as if it was installed within every database on the server. Usage:
+  ```
+  EXEC [AdventureWorks]..[sp_generate_merge] 'AddressType', @Schema='Person'
+  ```
+- **Cloud editions** (Azure SQL/Managed Instance):
+  Installs into the _current database_, given that custom system stored procedures aren't an option in cloud editions. Usage:
+  ```
+  EXEC [sp_generate_merge] 'AddressType', @Schema='Person'
+  ```
+#### Alternative installation: Temporary stored procedure
+Another option is to install `sp_generate_merge` as a temporary stored procedure. This is useful if you don't have `CREATE` access within the target server/database, allowing you to call the proc as many times as you need until the session is closed. To install as a temp proc, simply replace all occurrences of `sp_generate_merge ` with `#sp_generate_merge` and execute the install script. Then, execute the proc within any database as follows:
+```
+EXEC [#sp_generate_merge] 'AddressType', @Schema='Person'
+```
+
 ## Acknowledgements
 
 - **Daniel Nolan** -- Creator/maintainer of sp_generate_merge https://danielnolan.io
@@ -56,31 +76,30 @@ The main use cases for which this tool was created to handle:
 **This procedure was adapted from `sp_generate_inserts`, written by [Narayana Vyas Kondreddi](http://vyaskn.tripod.com). I made a number of attempts to get in touch with Vyas to get his blessing for this fork -- given that no license details are specified in his code -- but was unfortunately unable to reach him. No copyright infringement is intended.
 
 
- 
-## Installation
-Simply execute the script, which will install it in `[master]` database as a system procedure (making it executable within user databases).
-
-
 ## Known Limitations
 This procedure has explicit support for the following datatypes: (small)datetime(2), datetimeoffset, (n)varchar, (n)text, (n)char, xml, int, float, real, (small)money, timestamp, rowversion, uniqueidentifier, (var)binary, hierarchyid, geometry and geography. All others are implicitly converted to their CHAR representations so YMMV depending on the datatype.
 
-The `image` datatype is not supported and an error will be thrown if these are not excluded using the `@cols_to_exclude` parameter.
+The deprecated `image` datatype is not supported and an error will be thrown if these are not excluded using the `@cols_to_exclude` parameter.
 
 When using the `@hash_compare_column` parameter, all columns in the source and target table must be implicitly convertible to strings (due to the use of `CONCAT` in the proc to calculate the hash value). This means that the following data types are not supported with `@hash_compare_column`: xml, hierarchyid, image, geometry and geography.
 
 
 ## Usage
-1. Ensure that your SQL client is configured to send results to grid.
-2. Execute the proc, providing the source table name as a parameter
-3. Click the hyperlink within the resultset.
-4. Copy the SQL (excluding the Output tags) and paste into a new query window to execute.
+1. Install the proc (see _Installation_, above)
+2. If using SSMS, ensure that it is configured to send results to grid rather than text.
+3. Execute the proc e.g. `EXEC [sp_generate_merge] 'MyTable'`
+4. Open the result set (eg. in SSMS/ADO/VSCode, click the hyperlink in the grid)
+5. Copy the SQL portion of the text and paste into a new query window to execute.
 
 
 ## Example
-To generate a MERGE statement containing all data within the Person.AddressType table, excluding the ModifiedDate and rowguid columns:
+To generate a MERGE statement containing all data within the `[Person].[AddressType]` table, excluding the `ModifiedDate` and `rowguid` columns:
 
 ```
-EXEC AdventureWorks.dbo.sp_generate_merge @schema = 'Person', @table_name ='AddressType', @cols_to_exclude = '''ModifiedDate'',''rowguid'''
+EXEC AdventureWorks..sp_generate_merge 
+  @schema = 'Person', 
+  @table_name ='AddressType', 
+  @cols_to_exclude = '''ModifiedDate'',''rowguid'''
 ```
 
 ### Output
@@ -123,9 +142,9 @@ GO
 EXEC sp_generate_merge 'titles'
 ```
 
-#### Example 2: To generate a MERGE statement for 'titlesCopy' table from 'titles' table:
+#### Example 2: To generate a MERGE statement for 'titlesCopy'  from 'titles' table:
 ```
-EXEC sp_generate_merge 'titles', 'titlesCopy'
+EXEC sp_generate_merge 'titles', @schema='titlesCopy'
 ```
 
 #### Example 3: To generate a MERGE statement for table 'titles' that will unconditionally UPDATE matching rows 
@@ -198,9 +217,9 @@ EXEC sp_generate_merge 'StateProvince', @schema = 'Person', @include_values = 0,
 
 #### Example 16: To generate a MERGE statement that will update the target table if the calculated hash value of the source does not match the `Hashvalue` column in the target:
 ```
-EXEC [DB].dbo.[sp_generate_merge] 
+EXEC sp_generate_merge
   @schema = 'Person', 
-  @target_table = '[DB].[Person].[StateProvince]', 
+  @target_table = '[Person].[StateProvince]', 
   @table_name = 'v_StateProvince',
   @include_values = 0,   
   @hash_compare_column = 'Hashvalue',
@@ -212,19 +231,19 @@ EXEC [DB].dbo.[sp_generate_merge]
 #### Example 17: To generate and immediately execute a MERGE statement that performs an ETL from a table in one database to another:
 ```
 DECLARE @sql NVARCHAR(MAX)
-EXEC [AdventureWorks2017].dbo.sp_generate_merge @output = @sql output, @results_to_text = null, @schema = 'Person', @table_name = 'AddressType', @include_values = 0, @include_use_db = 0, @batch_separator = null, @target_table = '[AdventureWorks2017_Target].[Person].[AddressType]'
-EXEC [AdventureWorks2017].dbo.sp_executesql @sql
+EXEC [AdventureWorks]..sp_generate_merge @output = @sql output, @results_to_text = null, @schema = 'Person', @table_name = 'AddressType', @include_values = 0, @include_use_db = 0, @batch_separator = null, @target_table = '[AdventureWorks_Target].[Person].[AddressType]'
+EXEC [AdventureWorks]..sp_executesql @sql
 ```
 
 #### Example 18: To generate a MERGE that works with a subset of data from the source table only (e.g. will only INSERT/UPDATE rows that meet certain criteria, and not delete unmatched rows):
 ```
-SELECT * INTO #CurrencyRateFiltered FROM AdventureWorks2017.Sales.CurrencyRate WHERE ToCurrencyCode = 'AUD';
+SELECT * INTO #CurrencyRateFiltered FROM AdventureWorks.Sales.CurrencyRate WHERE ToCurrencyCode = 'AUD';
 ALTER TABLE #CurrencyRateFiltered ADD CONSTRAINT PK_Sales_CurrencyRate PRIMARY KEY CLUSTERED ( CurrencyRateID )
-EXEC tempdb.dbo.sp_generate_merge @table_name='#CurrencyRateFiltered', @target_table='[AdventureWorks2017].[Sales].[CurrencyRate]', @delete_if_not_matched = 0, @include_use_db = 0;
+EXEC tempdb..sp_generate_merge @table_name='#CurrencyRateFiltered', @target_table='[AdventureWorks].[Sales].[CurrencyRate]', @delete_if_not_matched = 0, @include_use_db = 0;
 ```
 
 #### Example 19: To generate a MERGE split into batches based on a max rowcount per batch:
 Note: `@delete_if_not_matched` must be `0`, and `@include_values` must be `1`.
 ```
-EXEC [AdventureWorks2017].dbo.[sp_generate_merge] @table_name = 'MyTable', @schema = 'dbo', @delete_if_not_matched = 0, @max_rows_per_batch = 100
+EXEC [AdventureWorks]..[sp_generate_merge] @table_name = 'MyTable', @schema = 'dbo', @delete_if_not_matched = 0, @max_rows_per_batch = 100
 ```

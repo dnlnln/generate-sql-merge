@@ -1,13 +1,18 @@
 SET NOCOUNT ON
 SET QUOTED_IDENTIFIER ON
 
-IF OBJECT_ID('sp_MS_marksystemobject', 'P') IS NOT NULL
+IF 'sp_generate_merge' LIKE '#%'
+BEGIN
+  -- Instal as a temp stored proc on any SQL edition
+  PRINT 'Installing sp_generate_merge as a temp stored procedure'
+END
+ELSE IF OBJECT_ID('sp_MS_marksystemobject', 'P') IS NOT NULL
 BEGIN
   -- Install the proc on SQL Server Standard/Developer/Express/Enterprise
   PRINT 'Installing sp_generate_merge as a system stored procedure in [master] database'
   IF DB_NAME() != 'master'
   BEGIN
-    RAISERROR ('Wrong database context. Please USE [master] to allow sp_generate_merge to be installed as a system stored procedure.', 16, 1)
+    RAISERROR ('Wrong database context. Please USE [master] to allow sp_generate_merge to be installed as a system stored procedure. See "INSTALLATION" for more information.', 16, 1)
     SET NOEXEC ON
   END
 END
@@ -16,19 +21,18 @@ BEGIN
   -- Install the proc on Azure SQL/Managed Instance
   IF DB_NAME() = 'master'
   BEGIN
-    RAISERROR ('Cannot install sp_generate_merge in master DB as system stored procedures cannot be created on this edition of SQL Server (i.e. Azure SQL or Managed Instance). Please install this proc in a user database instead.', 16, 1)
+    RAISERROR ('Cannot install sp_generate_merge in master DB as system stored procedures cannot be created on this edition of SQL Server (i.e. Azure SQL or Managed Instance). Please install this proc in a user database or create it as a temporary proc instead. See "INSTALLATION" for more information.', 16, 1)
     SET NOEXEC ON
   END
   ELSE
   BEGIN
-    PRINT 'Warning: As this edition of SQL Server (i.e. Azure SQL or Managed Instance) does not allow system stored procedures to be created, sp_generate_merge will be installed within the current database context only: ' + QUOTENAME(DB_NAME())
+    PRINT 'Warning: As this edition of SQL Server (i.e. Azure SQL or Managed Instance) does not allow system stored procedures to be created, sp_generate_merge will be installed within the current database context only: ' + QUOTENAME(DB_NAME()) + '. See "INSTALLATION" for more information.'
   END
 END
-GO
-
-IF OBJECT_ID('sp_generate_merge', 'P') IS NOT NULL
+-- Drop the proc if it already exists
+IF OBJECT_ID('sp_generate_merge', 'P') IS NOT NULL OR ('sp_generate_merge' LIKE '#%' AND OBJECT_ID('tempdb..sp_generate_merge', 'P') IS NOT NULL)
 BEGIN
-  PRINT 'Dropping the existing procedure to allow it to be re-created'
+  PRINT '(dropping the existing procedure to allow it to be re-created)'
   DROP PROC [sp_generate_merge]
 END
 GO
@@ -68,26 +72,17 @@ AS
 BEGIN
 
 /***********************************************************************************************************
-PROCEDURE: sp_generate_merge  
+PROCEDURE: sp_generate_merge
 
 GITHUB PROJECT: https://github.com/dnlnln/generate-sql-merge
 
-PURPOSE: Generates a MERGE statement from a table which will INSERT/UPDATE/DELETE data 
-         based on matching primary key values in the source/target table. The generated statements 
-         can be executed to replicate the data in some other location.
- 
-USE CASES:
-  - Generate statements for static data tables, store the .SQL file in source control and use 
-    it as part of your Dev/Test/Prod deployment. The generated statements are re-runnable, so 
-    you can make changes to the file and migrate those changes between environments.
+DESCRIPTION: Generates a MERGE statement from a table which will INSERT/UPDATE/DELETE data 
+             based on matching primary key values in the source/target table. The generated statements 
+             can be executed to replicate the data in some other location.
 
-  - Generate statements from your Production tables and then run those statements in your 
-    Dev/Test environments. Schedule this as part of a SQL Job to keep all of your environments
-    in-sync.
+INSTALLATION:
+  Simply execute this script to install. For details, including alternative install methods, see README.md.
 
-  - Enter test data into your Dev environment, and then generate statements from the Dev
-    tables so that you can always reproduce your test database with valid sample data.
- 
 ACKNOWLEDGEMENTS:
   Daniel Nolan -- Creator/maintainer of sp_generate_merge
   https://danielnolan.io
@@ -108,19 +103,21 @@ ACKNOWLEDGEMENTS:
   Nathan Skerl -- StackOverflow answer that provided a workaround for the output truncation problem
   http://stackoverflow.com/a/10489767/266882
 
-  Eitan Blumin** -- Added the ability to divide merges into multiple batches of x rows
+  Eitan Blumin -- Added the ability to divide merges into multiple batches of x rows
   https://www.eitanblumin.com/
 
 LICENSE: See LICENSE file
 
 FURTHER INFO: See README.md
 
-GETTING STARTED:
-  Ensure that your SQL client is configured to send results to grid (default SSMS behaviour).
-  This ensures that the generated MERGE statement can be output in full, getting around SSMS's 4000 nchar limit.
-  After running this proc, click the hyperlink within the single row returned to copy the generated MERGE statement.
+USAGE:
+  1. Install the proc by executing this script (see README.md for details)
+  2. If using SSMS, ensure that it is configured to send results to grid rather than text.
+  3. Execute the proc e.g. EXEC [sp_generate_merge] 'MyTable'
+  4. Open the result set (eg. in SSMS/ADO/VSCode, click the hyperlink in the grid)
+  5. Copy the SQL portion of the text and paste into a new query window to execute.
 
-USAGE EXAMPLES:
+EXAMPLES:
 Example 1: To generate a MERGE statement for table 'titles':
  
   EXEC sp_generate_merge 'titles'
@@ -186,32 +183,32 @@ Example 15: To generate a statement that MERGEs data directly from the source ta
 
 Example 16: To generate a MERGE statement that will update the target table if the calculated hash value of the source does not match the [Hashvalue] column in the target:
 
-  EXEC [DB].dbo.[sp_generate_merge] 
-  @schema = 'Person', 
-  @target_table = '[DB].[Person].[StateProvince]', 
-  @table_name = 'v_StateProvince',
-  @include_values = 0,   
-  @hash_compare_column = 'Hashvalue',
-  @include_rowsaffected = 0,
-  @nologo = 1,
-  @cols_to_join_on = "'ID'"
+  EXEC sp_generate_merge
+    @schema = 'Person', 
+    @target_table = '[Person].[StateProvince]', 
+    @table_name = 'v_StateProvince',
+    @include_values = 0,   
+    @hash_compare_column = 'Hashvalue',
+    @include_rowsaffected = 0,
+    @nologo = 1,
+    @cols_to_join_on = "'ID'"
 
 Example 17: To generate and immediately execute a MERGE statement that performs an ETL from a table in one database to another:
 
   DECLARE @sql NVARCHAR(MAX)
-  EXEC [AdventureWorks2017].dbo.sp_generate_merge @output = @sql output, @results_to_text = null, @schema = 'Person', @table_name = 'AddressType', @include_values = 0, @include_use_db = 0, @batch_separator = null, @target_table = '[AdventureWorks2017_Target].[Person].[AddressType]'
-  EXEC [AdventureWorks2017].dbo.sp_executesql @sql
+  EXEC [AdventureWorks]..sp_generate_merge @output = @sql output, @results_to_text = null, @schema = 'Person', @table_name = 'AddressType', @include_values = 0, @include_use_db = 0, @batch_separator = null, @target_table = '[AdventureWorks_Target].[Person].[AddressType]'
+  EXEC [AdventureWorks]..sp_executesql @sql
 
 Example 18: To generate a MERGE that works with a subset of data from the source table only (e.g. will only INSERT/UPDATE rows that meet certain criteria, and not delete unmatched rows):
 
-  SELECT * INTO #CurrencyRateFiltered FROM AdventureWorks2017.Sales.CurrencyRate WHERE ToCurrencyCode = 'AUD';
+  SELECT * INTO #CurrencyRateFiltered FROM AdventureWorks.Sales.CurrencyRate WHERE ToCurrencyCode = 'AUD';
   ALTER TABLE #CurrencyRateFiltered ADD CONSTRAINT PK_Sales_CurrencyRate PRIMARY KEY CLUSTERED ( CurrencyRateID )
-  EXEC tempdb.dbo.sp_generate_merge @table_name='#CurrencyRateFiltered', @target_table='[AdventureWorks2017].[Sales].[CurrencyRate]', @delete_if_not_matched = 0, @include_use_db = 0;
+  EXEC tempdb..sp_generate_merge @table_name='#CurrencyRateFiltered', @target_table='[AdventureWorks].[Sales].[CurrencyRate]', @delete_if_not_matched = 0, @include_use_db = 0;
 
 Example 19: To generate a MERGE split into batches based on a max rowcount per batch:
   Note: @delete_if_not_matched must be 0, and @include_values must be 1
 
-  EXEC [AdventureWorks2017].dbo.[sp_generate_merge] @table_name = 'MyTable', @schema = 'dbo', @delete_if_not_matched = 0, @max_rows_per_batch = 100
+  EXEC [AdventureWorks]..[sp_generate_merge] @table_name = 'MyTable', @schema = 'dbo', @delete_if_not_matched = 0, @max_rows_per_batch = 100
  
 ***********************************************************************************************************/
 
@@ -300,7 +297,7 @@ BEGIN
 	IF DB_NAME() <> 'tempdb'
 	BEGIN
 		RAISERROR('Incorrect database context. The proc must be executed against [tempdb] when a temporary table is specified.',16,1)
-		PRINT 'To resolve, execute the proc in the context of [tempdb], e.g. EXEC tempdb.dbo.sp_generate_merge @table_name=''' + @table_name COLLATE DATABASE_DEFAULT + ''''
+		PRINT 'To resolve, execute the proc in the context of [tempdb], e.g. EXEC tempdb..sp_generate_merge @table_name=''' + @table_name COLLATE DATABASE_DEFAULT + ''''
 		RETURN -1 --Failure. Reason: Temporary tables cannot be referenced in a user db
 	END
 	SET @Internal_Table_Name = (SELECT [name] FROM sys.objects WHERE [object_id] = OBJECT_ID(@table_name COLLATE DATABASE_DEFAULT))
@@ -964,15 +961,17 @@ RETURN 0
 END
 GO
 
-IF OBJECT_ID('sp_MS_marksystemobject', 'P') IS NOT NULL AND DB_NAME() = 'master'
+IF 'sp_generate_merge' NOT LIKE '#%'
 BEGIN
-  PRINT 'Adding system object flag to allow procedure to be used within all databases'
-  EXEC sp_MS_marksystemobject 'sp_generate_merge'
+  IF OBJECT_ID('sp_MS_marksystemobject', 'P') IS NOT NULL AND DB_NAME() = 'master'
+  BEGIN
+    PRINT 'Adding system object flag to allow procedure to be used within all databases'
+    EXEC sp_MS_marksystemobject 'sp_generate_merge'
+  END
+  PRINT 'Granting EXECUTE permission on stored procedure to all users'
+  GRANT EXEC ON [sp_generate_merge] TO [public]
 END
-GO
-PRINT 'Granting EXECUTE permission on stored procedure to all users'
-GO
-GRANT EXEC ON [sp_generate_merge] TO [public]
+PRINT 'Done'
 SET NOCOUNT OFF
 SET NOEXEC OFF
 GO
