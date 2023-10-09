@@ -760,11 +760,22 @@ BEGIN
 	END
 END
 
+DECLARE @Multi_SqlBatch BIT = (CASE WHEN @max_rows_per_batch IS NOT NULL AND @batch_separator IS NOT NULL THEN 1 ELSE 0 END)
 DECLARE @Output_Var_Suffix AS NVARCHAR(128) = CASE WHEN @batch_separator IS NULL THEN REPLACE(CAST(@Source_Table_Object_Id AS NVARCHAR(128)), '-', '') ELSE '' END
-DECLARE @Merge_Output_Var_Name AS NVARCHAR(128) = N'@mergeOutput' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
+DECLARE @Merge_Output_Var_Name AS NVARCHAR(128) = NULL
 IF @include_rowsaffected = 1 AND @quiet = 0
 BEGIN
- SET @output += @b COLLATE DATABASE_DEFAULT + 'DECLARE ' + @Merge_Output_Var_Name COLLATE DATABASE_DEFAULT + ' TABLE ( [DMLAction] VARCHAR(6) );'
+  IF @Multi_SqlBatch = 1
+  BEGIN
+    SET @Merge_Output_Var_Name = N'#mergeMultiBatchOutput'
+    SET @output += @b COLLATE DATABASE_DEFAULT + 'CREATE TABLE ' + QUOTENAME(@Merge_Output_Var_Name COLLATE DATABASE_DEFAULT) + ' ( [DMLAction] VARCHAR(6) );'
+    SET @output += @b COLLATE DATABASE_DEFAULT + @b COLLATE DATABASE_DEFAULT + @batch_separator COLLATE DATABASE_DEFAULT
+  END
+  ELSE
+  BEGIN
+    SET @Merge_Output_Var_Name = N'@mergeOutput' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
+    SET @output += @b COLLATE DATABASE_DEFAULT + 'DECLARE ' + @Merge_Output_Var_Name COLLATE DATABASE_DEFAULT + ' TABLE ( [DMLAction] VARCHAR(6) );'
+  END
 END
 
 DECLARE @outputMergeBatch nvarchar(max), @ValuesListTotalCount int;
@@ -866,6 +877,10 @@ BEGIN
 						ORDER BY ID FOR XML PATH('')) AS XML).value('.', 'NVARCHAR(MAX)');
 		
 		SET @output += REPLACE(@outputMergeBatch COLLATE DATABASE_DEFAULT, '{{ValuesList}}', @CurrentValuesList);
+    IF @Multi_SqlBatch = 1
+    BEGIN
+      SET @output += @b COLLATE DATABASE_DEFAULT + @batch_separator COLLATE DATABASE_DEFAULT
+    END
 
 		SET @ValuesListIDFrom = @ValuesListIDTo + 1;
 	END
@@ -893,6 +908,10 @@ BEGIN
  SET @output += @b COLLATE DATABASE_DEFAULT + @Merge_CountDel_Var_Name COLLATE DATABASE_DEFAULT + ' int'
  SET @output += @b COLLATE DATABASE_DEFAULT + 'SELECT ' + @Merge_Error_Var_Name COLLATE DATABASE_DEFAULT + ' = @@ERROR'
  SET @output += @b COLLATE DATABASE_DEFAULT + 'SELECT ' + @Merge_Count_Var_Name COLLATE DATABASE_DEFAULT + ' = COUNT(1), ' + @Merge_CountIns_Var_Name COLLATE DATABASE_DEFAULT + ' = SUM(IIF([DMLAction] = ''INSERT'', 1, 0)), ' + @Merge_CountUpd_Var_Name COLLATE DATABASE_DEFAULT + ' = SUM(IIF([DMLAction] = ''UPDATE'', 1, 0)), ' + @Merge_CountDel_Var_Name COLLATE DATABASE_DEFAULT + ' = SUM (IIF([DMLAction] = ''DELETE'', 1, 0)) FROM ' + @Merge_Output_Var_Name COLLATE DATABASE_DEFAULT
+ IF @Multi_SqlBatch = 1
+ BEGIN
+  SET @output += @b COLLATE DATABASE_DEFAULT + 'DROP TABLE ' + QUOTENAME(@Merge_Output_Var_Name COLLATE DATABASE_DEFAULT)
+ END
  SET @output += @b COLLATE DATABASE_DEFAULT + 'IF ' + @Merge_Error_Var_Name COLLATE DATABASE_DEFAULT + ' != 0'
  SET @output += @b COLLATE DATABASE_DEFAULT + ' BEGIN' 
  SET @output += @b COLLATE DATABASE_DEFAULT + ' PRINT ''ERROR OCCURRED IN MERGE FOR ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + '. Rows affected: '' + CAST('+ @Merge_Count_Var_Name COLLATE DATABASE_DEFAULT + ' AS VARCHAR(100)); -- SQL should always return zero rows affected';
