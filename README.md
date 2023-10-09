@@ -47,10 +47,13 @@ Simply execute `sp_generate_merge.sql` to install the proc.
   EXEC [sp_generate_merge] 'AddressType', @Schema='Person'
   ```
 #### Alternative installation: Temporary stored procedure
-Another option is to install `sp_generate_merge` as a temporary stored procedure. This is useful if you don't have `CREATE` access within the target server/database, allowing you to call the proc as many times as you need until the session is closed. To install as a temp proc, simply replace all occurrences of `sp_generate_merge ` with `#sp_generate_merge` and execute the install script. Then, execute the proc within any database as follows:
-```
-EXEC [#sp_generate_merge] 'AddressType', @Schema='Person'
-```
+Another option is to install `sp_generate_merge` as a temporary stored procedure. This is useful if the database is read only or you don't have "create object" permission. Usage:
+
+1. Edit `sp_generate_merge.sql`, replacing all occurrences of `sp_generate_merge` with `#sp_generate_merge`
+2. Connect to the database that you want to use the proc within i.e. `USE [AdventureWorks]`
+3. Execute the script
+4. Generate merge statements as follows: `EXEC [#sp_generate_merge] @Schema='Person', @Table_Name='AddressType'`
+
 
 ## Acknowledgements
 
