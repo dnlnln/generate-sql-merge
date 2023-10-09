@@ -354,7 +354,7 @@ DECLARE @Column_ID int,
 IF @hash_compare_column IS NOT NULL  --Check existence of column [Hashvalue] in target table and raise error in case of missing
 BEGIN
   IF @target_table IS NULL SET @target_table = @table_name COLLATE DATABASE_DEFAULT
-  SET @SQL =
+  SET @sql =
     'SELECT @columnname = column_name
     FROM ' + COALESCE(PARSENAME(@target_table COLLATE DATABASE_DEFAULT,3),QUOTENAME(DB_NAME())) + '.INFORMATION_SCHEMA.COLUMNS (NOLOCK)
     WHERE TABLE_NAME = ''' + PARSENAME(@target_table COLLATE DATABASE_DEFAULT,1) + '''' +
