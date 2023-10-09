@@ -311,24 +311,24 @@ END
 --This procedure is not written to work on system tables
 --To script the data in system tables, just create a view on the system tables and script the view instead
 IF @schema IS NULL
- BEGIN
- IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT AND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW') AND TABLE_SCHEMA = SCHEMA_NAME())
- BEGIN
- RAISERROR('User table or view not found.',16,1)
- PRINT 'You may see this error if the specified table is not in your default schema (' + SCHEMA_NAME() + '). In that case use @schema parameter to specify the schema name.'
- PRINT 'Make sure you have SELECT permission on that table or view.'
- RETURN -1 --Failure. Reason: There is no user table or view with this name
- END
- END
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT AND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW') AND TABLE_SCHEMA = SCHEMA_NAME())
+  BEGIN
+    RAISERROR('User table or view not found.',16,1)
+    PRINT 'You may see this error if the specified table is not in your default schema (' + SCHEMA_NAME() + '). In that case use @schema parameter to specify the schema name.'
+    PRINT 'Make sure you have SELECT permission on that table or view.'
+    RETURN -1 --Failure. Reason: There is no user table or view with this name
+  END
+END
 ELSE
- BEGIN
- IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT AND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW') AND TABLE_SCHEMA = @schema COLLATE DATABASE_DEFAULT)
- BEGIN
- RAISERROR('User table or view not found.',16,1)
- PRINT 'Make sure you have SELECT permission on that table or view.'
- RETURN -1 --Failure. Reason: There is no user table or view with this name 
- END
- END
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT AND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW') AND TABLE_SCHEMA = @schema COLLATE DATABASE_DEFAULT)
+  BEGIN
+    RAISERROR('User table or view not found.',16,1)
+    PRINT 'Make sure you have SELECT permission on that table or view.'
+    RETURN -1 --Failure. Reason: There is no user table or view with this name 
+  END
+END
 
 
 --Variable declarations
@@ -351,27 +351,22 @@ DECLARE @Column_ID int,
  @SourceHashColumn bit = 0,
  @b char(1) = char(13)
 
- IF @hash_compare_column IS NOT NULL  --Check existence of column [Hashvalue] in target table and raise error in case of missing
- BEGIN
- IF @target_table IS NULL
- BEGIN
-	SET @target_table = @table_name COLLATE DATABASE_DEFAULT
- END		
- SET @SQL =
-	'SELECT @columnname = column_name
-	FROM ' + COALESCE(PARSENAME(@target_table COLLATE DATABASE_DEFAULT,3),QUOTENAME(DB_NAME())) + '.INFORMATION_SCHEMA.COLUMNS (NOLOCK)
-	WHERE TABLE_NAME = ''' + PARSENAME(@target_table COLLATE DATABASE_DEFAULT,1) + '''' +
-	' AND TABLE_SCHEMA = ' + '''' + COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME()) + '''' + ' AND [COLUMN_NAME] = ''' + @hash_compare_column COLLATE DATABASE_DEFAULT + ''''
-
-	EXECUTE sp_executesql @sql, N'@columnname nvarchar(128) OUTPUT', @columnname = @checkhashcolumn OUTPUT
-	IF @checkhashcolumn IS NULL
-	BEGIN
-	  RAISERROR('Column %s not found ',16,1, @hash_compare_column)
-	  PRINT 'The specified @hash_compare_column ' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT) +  ' does not exist in ' + QUOTENAME(@target_table COLLATE DATABASE_DEFAULT) + '. Please make sure that ' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT) + ' VARBINARY (8000) exits in the target table'
-	  RETURN -1 --Failure. Reason: There is no column that can be used as the basis of Hashcompare
-	END	
-
- END
+IF @hash_compare_column IS NOT NULL  --Check existence of column [Hashvalue] in target table and raise error in case of missing
+BEGIN
+  IF @target_table IS NULL SET @target_table = @table_name COLLATE DATABASE_DEFAULT
+  SET @SQL =
+    'SELECT @columnname = column_name
+    FROM ' + COALESCE(PARSENAME(@target_table COLLATE DATABASE_DEFAULT,3),QUOTENAME(DB_NAME())) + '.INFORMATION_SCHEMA.COLUMNS (NOLOCK)
+    WHERE TABLE_NAME = ''' + PARSENAME(@target_table COLLATE DATABASE_DEFAULT,1) + '''' +
+    ' AND TABLE_SCHEMA = ' + '''' + COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME()) + '''' + ' AND [COLUMN_NAME] = ''' + @hash_compare_column COLLATE DATABASE_DEFAULT + ''''
+  EXECUTE sp_executesql @sql, N'@columnname nvarchar(128) OUTPUT', @columnname = @checkhashcolumn OUTPUT
+  IF @checkhashcolumn IS NULL
+  BEGIN
+    RAISERROR('Column %s not found ',16,1, @hash_compare_column)
+    PRINT 'The specified @hash_compare_column ' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT) +  ' does not exist in ' + QUOTENAME(@target_table COLLATE DATABASE_DEFAULT) + '. Please make sure that ' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT) + ' VARBINARY (8000) exits in the target table'
+    RETURN -1 --Failure. Reason: There is no column that can be used as the basis of Hashcompare
+  END
+END
  
 
 --Variable Initialization
@@ -657,30 +652,32 @@ IF @debug_mode = 1 AND @quiet = 0
  END
  
 IF @include_use_db = 1
- BEGIN
-	SET @output += @b 
-	SET @output += @b COLLATE DATABASE_DEFAULT + 'USE ' + QUOTENAME(DB_NAME())
-	SET @output += @b COLLATE DATABASE_DEFAULT + ISNULL(@batch_separator, '')
-	SET @output += @b 
- END
+BEGIN
+  SET @output += @b 
+  SET @output += @b COLLATE DATABASE_DEFAULT + 'USE ' + QUOTENAME(DB_NAME())
+  SET @output += @b COLLATE DATABASE_DEFAULT + ISNULL(@batch_separator, '')
+  SET @output += @b 
+END
 
 IF @nologo = 0 AND @quiet = 0
- BEGIN
+BEGIN
   SET @output += @b COLLATE DATABASE_DEFAULT + '--MERGE generated by [sp_generate_merge] proc tool. Acknowledgements: https://github.com/dnlnln/generate-sql-merge'
- SET @output += @b COLLATE DATABASE_DEFAULT + ''
- END
+  SET @output += @b COLLATE DATABASE_DEFAULT + ''
+END
 
 IF @include_rowsaffected = 1 -- If the caller has elected not to include the "rows affected" section, let MERGE output the row count as it is executed.
- SET @output += @b COLLATE DATABASE_DEFAULT + 'SET NOCOUNT ON'
- SET @output += @b COLLATE DATABASE_DEFAULT + ''
+BEGIN
+  SET @output += @b COLLATE DATABASE_DEFAULT + 'SET NOCOUNT ON'
+  SET @output += @b COLLATE DATABASE_DEFAULT + ''
+END
 
 
 --Determining whether to print IDENTITY_INSERT or not
 IF LEN(@IDN) <> 0
- BEGIN
- SET @output += @b COLLATE DATABASE_DEFAULT + 'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' ON'
- SET @output += @b COLLATE DATABASE_DEFAULT + ''
- END
+BEGIN
+  SET @output += @b COLLATE DATABASE_DEFAULT + 'SET IDENTITY_INSERT ' + @Target_Table_For_Output + ' ON'
+  SET @output += @b COLLATE DATABASE_DEFAULT + ''
+END
 
 
 --Temporarily disable constraints on the target table
@@ -893,24 +890,24 @@ END
 --Display the number of affected rows to the user, or report if an error occurred---
 IF @include_rowsaffected = 1 AND @quiet = 0
 BEGIN
- DECLARE @Merge_Error_Var_Name AS NVARCHAR(128) = N'@mergeError' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
- DECLARE @Merge_Count_Var_Name AS NVARCHAR(128) = N'@mergeCount' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
- DECLARE @Merge_CountIns_Var_Name AS NVARCHAR(128) = N'@mergeCountIns' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
- DECLARE @Merge_CountUpd_Var_Name AS NVARCHAR(128) = N'@mergeCountUpd' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
- DECLARE @Merge_CountDel_Var_Name AS NVARCHAR(128) = N'@mergeCountDel' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
- SET @output += @b COLLATE DATABASE_DEFAULT + 'DECLARE ' + @Merge_Error_Var_Name COLLATE DATABASE_DEFAULT + ' INT = @@ERROR'
- SET @output += ', ' + @Merge_Count_Var_Name COLLATE DATABASE_DEFAULT + ' INT = (SELECT COUNT(1) FROM ' + @Merge_Output_Var_Name COLLATE DATABASE_DEFAULT + ')'
- SET @output += ', ' + @Merge_CountIns_Var_Name COLLATE DATABASE_DEFAULT + ' INT = (SELECT COUNT(1) FROM ' + @Merge_Output_Var_Name COLLATE DATABASE_DEFAULT + ' WHERE [DMLAction] = ''INSERT'')'
- SET @output += ', ' + @Merge_CountUpd_Var_Name COLLATE DATABASE_DEFAULT + ' INT = (SELECT COUNT(1) FROM ' + @Merge_Output_Var_Name COLLATE DATABASE_DEFAULT + ' WHERE [DMLAction] = ''UPDATE'')'
- SET @output += ', ' + @Merge_CountDel_Var_Name COLLATE DATABASE_DEFAULT + ' INT = (SELECT COUNT(1) FROM ' + @Merge_Output_Var_Name COLLATE DATABASE_DEFAULT + ' WHERE [DMLAction] = ''DELETE'');'
- IF @Multi_SqlBatch = 1
- BEGIN
-  SET @output += @b COLLATE DATABASE_DEFAULT + 'DROP TABLE ' + QUOTENAME(@Merge_Output_Var_Name COLLATE DATABASE_DEFAULT)
- END
- SET @output += @b COLLATE DATABASE_DEFAULT + 'IF ' + @Merge_Error_Var_Name COLLATE DATABASE_DEFAULT + ' <> 0 PRINT ''ERROR OCCURRED IN MERGE FOR ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ''' + CONCAT('' (SQL Server error code: '', ' + @Merge_Error_Var_Name COLLATE DATABASE_DEFAULT + ') + '')'';'
- SET @output += @b COLLATE DATABASE_DEFAULT + 'PRINT CONCAT(''' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' rows affected by MERGE: '', ' + @Merge_Count_Var_Name COLLATE DATABASE_DEFAULT + ') + CONCAT('' (Inserted: '', ' + @Merge_CountIns_Var_Name COLLATE DATABASE_DEFAULT + ') + CONCAT(''; Updated: '', ' + @Merge_CountUpd_Var_Name COLLATE DATABASE_DEFAULT + ') + CONCAT(''; Deleted: '', ' + @Merge_CountDel_Var_Name COLLATE DATABASE_DEFAULT + ') + '')'';'
- SET @output += @b COLLATE DATABASE_DEFAULT + ISNULL(@batch_separator COLLATE DATABASE_DEFAULT, '')
- SET @output += @b COLLATE DATABASE_DEFAULT + @b
+  DECLARE @Merge_Error_Var_Name AS NVARCHAR(128) = N'@mergeError' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
+  DECLARE @Merge_Count_Var_Name AS NVARCHAR(128) = N'@mergeCount' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
+  DECLARE @Merge_CountIns_Var_Name AS NVARCHAR(128) = N'@mergeCountIns' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
+  DECLARE @Merge_CountUpd_Var_Name AS NVARCHAR(128) = N'@mergeCountUpd' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
+  DECLARE @Merge_CountDel_Var_Name AS NVARCHAR(128) = N'@mergeCountDel' + @Output_Var_Suffix COLLATE DATABASE_DEFAULT
+  SET @output += @b COLLATE DATABASE_DEFAULT + 'DECLARE ' + @Merge_Error_Var_Name COLLATE DATABASE_DEFAULT + ' INT = @@ERROR'
+  SET @output += ', ' + @Merge_Count_Var_Name COLLATE DATABASE_DEFAULT + ' INT = (SELECT COUNT(1) FROM ' + @Merge_Output_Var_Name COLLATE DATABASE_DEFAULT + ')'
+  SET @output += ', ' + @Merge_CountIns_Var_Name COLLATE DATABASE_DEFAULT + ' INT = (SELECT COUNT(1) FROM ' + @Merge_Output_Var_Name COLLATE DATABASE_DEFAULT + ' WHERE [DMLAction] = ''INSERT'')'
+  SET @output += ', ' + @Merge_CountUpd_Var_Name COLLATE DATABASE_DEFAULT + ' INT = (SELECT COUNT(1) FROM ' + @Merge_Output_Var_Name COLLATE DATABASE_DEFAULT + ' WHERE [DMLAction] = ''UPDATE'')'
+  SET @output += ', ' + @Merge_CountDel_Var_Name COLLATE DATABASE_DEFAULT + ' INT = (SELECT COUNT(1) FROM ' + @Merge_Output_Var_Name COLLATE DATABASE_DEFAULT + ' WHERE [DMLAction] = ''DELETE'');'
+  IF @Multi_SqlBatch = 1
+  BEGIN
+    SET @output += @b COLLATE DATABASE_DEFAULT + 'DROP TABLE ' + QUOTENAME(@Merge_Output_Var_Name COLLATE DATABASE_DEFAULT)
+  END
+  SET @output += @b COLLATE DATABASE_DEFAULT + 'IF ' + @Merge_Error_Var_Name COLLATE DATABASE_DEFAULT + ' <> 0 PRINT ''ERROR OCCURRED IN MERGE FOR ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ''' + CONCAT('' (SQL Server error code: '', ' + @Merge_Error_Var_Name COLLATE DATABASE_DEFAULT + ') + '')'';'
+  SET @output += @b COLLATE DATABASE_DEFAULT + 'PRINT CONCAT(''' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' rows affected by MERGE: '', ' + @Merge_Count_Var_Name COLLATE DATABASE_DEFAULT + ') + CONCAT('' (Inserted: '', ' + @Merge_CountIns_Var_Name COLLATE DATABASE_DEFAULT + ') + CONCAT(''; Updated: '', ' + @Merge_CountUpd_Var_Name COLLATE DATABASE_DEFAULT + ') + CONCAT(''; Deleted: '', ' + @Merge_CountDel_Var_Name COLLATE DATABASE_DEFAULT + ') + '')'';'
+  SET @output += @b COLLATE DATABASE_DEFAULT + ISNULL(@batch_separator COLLATE DATABASE_DEFAULT, '')
+  SET @output += @b COLLATE DATABASE_DEFAULT + @b
 END
 
 --Re-enable the temporarily disabled constraints-------------------------------------
@@ -924,18 +921,17 @@ END
 
 --Switch-off identity inserting------------------------------------------------------
 IF (LEN(@IDN) <> 0)
- BEGIN
- SET @output += @b
- SET @output += @b COLLATE DATABASE_DEFAULT +'SET IDENTITY_INSERT ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' OFF'
- 	
- END
+BEGIN
+  SET @output += @b
+  SET @output += @b COLLATE DATABASE_DEFAULT +'SET IDENTITY_INSERT ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' OFF' 	
+END
 
 IF (@include_rowsaffected = 1)
 BEGIN
- SET @output += @b
- SET @output +=      'SET NOCOUNT OFF'
- SET @output += @b COLLATE DATABASE_DEFAULT + ISNULL(@batch_separator COLLATE DATABASE_DEFAULT, '')
- SET @output += @b
+  SET @output += @b
+  SET @output += 'SET NOCOUNT OFF'
+  SET @output += @b COLLATE DATABASE_DEFAULT + ISNULL(@batch_separator COLLATE DATABASE_DEFAULT, '')
+  SET @output += @b
 END
 
 SET @output += @b COLLATE DATABASE_DEFAULT + ''
