@@ -46,7 +46,7 @@ CREATE PROC [sp_generate_merge]
  @include_timestamp bit = 0, -- [DEPRECATED] Sql Server does not allow modification of TIMESTAMP datatype
  @debug_mode bit = 0, -- If @debug_mode is set to 1, the SQL statements constructed by this procedure will be printed for later examination
  @schema nvarchar(64) = NULL, -- Use this parameter if you are not the owner of the table
- @ommit_images bit = 0, -- As the image data type is currently unsupported, leaving @ommit_images=0 will cause an error to be raised by sp_generate_merge if an image column is found in the specified table. Proactively specify @ommit_images=1 to exclude image columns and avoid this error.
+ @ommit_images bit = 0, -- Excludes any columns of the IMAGE data type
  @ommit_identity bit = 0, -- Use this parameter to omit the identity columns
  @top int = NULL, -- Use this parameter to generate a MERGE statement only for the TOP n rows
  @cols_to_include nvarchar(max) = NULL, -- List of columns to be included in the MERGE statement
@@ -144,7 +144,7 @@ Example 6: If the table is in a different schema to the default eg. `Contact.Add
 
   EXEC sp_generate_merge 'AddressType', @schema = 'Contact'
 
-Example 7: To generate a MERGE statement for the rest of the columns excluding those of the `image` data type:
+Example 7: To generate a MERGE statement excluding IMAGE data type columns:
 
   EXEC sp_generate_merge 'imgtable', @ommit_images = 1
 
@@ -472,19 +472,12 @@ BEGIN
   IF @hash_compare_column IS NOT NULL AND @Column_Name = QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
     SET @SourceHashColumn = 1
  
-  --Image columns are not currently supported. Throw an error if this is an image column and the user hasn't specified @ommit_images=1 yet
-  IF @Data_Type COLLATE DATABASE_DEFAULT = 'image'
+  --Historically, image columns were not supported by this proc, so exclude them if the user still doesn't want them
+  IF @ommit_images = 1 AND @Data_Type COLLATE DATABASE_DEFAULT = 'image'
   BEGIN
-    IF (@ommit_images = 0)
-    BEGIN
-      RAISERROR('Tables with image columns are not supported.',16,1)
-      PRINT 'Use @ommit_images = 1 parameter to generate a MERGE for the rest of the columns.'
-      RETURN -1 --Failure. Reason: There is a column with image data type
-    END
-    ELSE
-    BEGIN
-      GOTO SKIP_LOOP
-    END
+    IF @quiet = 0
+      PRINT 'Warning: The ' + @Column_Name + ' image column will be excluded from the MERGE statement. Specify @ommit_images = 0 to include image columns.'
+    GOTO SKIP_LOOP 
   END
 
   --Serialise the data in the appropriate way for the given column's data type, while preserving column precision and accommodating for NULL values.
@@ -498,6 +491,7 @@ BEGIN
       WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('ntext')                                                                 THEN 'COALESCE(''''''''  + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')'
       WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('xml')                                                                   THEN 'COALESCE(''''''''  + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''',''NULL'')'
       WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('binary','varbinary')                                                    THEN 'COALESCE(RTRIM(CONVERT(varchar(max),' + @Column_Name + ', 1)),''NULL'')'
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('image')                                                                 THEN 'COALESCE(RTRIM(CONVERT(varchar(max), CONVERT(varbinary(max), ' + @Column_Name + ', 1), 1)),''NULL'')'
       WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('float','real','money','smallmoney')                                     THEN 'COALESCE(LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ',2)' + ')),''NULL'')'
       WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('hierarchyid')                                                           THEN 'COALESCE(''hierarchyid::Parse(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))+''''''''+'')'',''NULL'')'
       WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('geography')                                                             THEN 'COALESCE(''geography::STGeomFromText(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(nvarchar(max),' + @Column_Name + ')' + '))+''''''''+'', 4326)'',''NULL'')'
@@ -541,6 +535,7 @@ BEGIN
         WHEN 'text'      THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL'
         WHEN 'ntext'     THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL' 
         WHEN 'xml'       THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL' 
+        WHEN 'image'     THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARBINARY(MAX)), CAST([Target].' + @Column_Name + ' AS VARBINARY(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARBINARY(MAX)), CAST([Source].' + @Column_Name + ' AS VARBINARY(MAX))) IS NOT NULL' 
         WHEN 'geography' THEN '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geography::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0)'
         WHEN 'geometry'  THEN '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geometry::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0)'
         ELSE                  'NULLIF([Source].' + @Column_Name + ', [Target].' + @Column_Name + ') IS NOT NULL OR NULLIF([Target].' + @Column_Name + ', [Source].' + @Column_Name + ') IS NOT NULL'
