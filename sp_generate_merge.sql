@@ -43,11 +43,11 @@ CREATE PROC [sp_generate_merge]
  @target_table nvarchar(776) = NULL, -- Use this parameter to specify a different table name into which the data will be inserted/updated/deleted. This parameter accepts unquoted single-part identifiers (e.g. MyTable) or quoted multi-part identifiers (e.g. [OtherDb].[dbo].[MyTable])
  @from nvarchar(max) = NULL, -- Use this parameter to filter the rows based on a filter condition (using WHERE). Note: To avoid inconsistent ordering of results, including an ORDER BY clause is highly recommended
  @include_values bit = 1, -- When 1, a VALUES clause containing data from @table_name is generated. When 0, data will be sourced directly from @table_name when the MERGE is executed (see example 15 for use case)
- @include_timestamp bit = 0, -- [DEPRECATED] Sql Server does not allow modification of TIMESTAMP datatype
+ @include_timestamp bit = 0, -- [OBSOLETE] Sql Server does not allow modification of TIMESTAMP data type
  @debug_mode bit = 0, -- If @debug_mode is set to 1, the SQL statements constructed by this procedure will be printed for later examination
  @schema nvarchar(64) = NULL, -- Use this parameter if you are not the owner of the table
  @ommit_images bit = 0, -- Excludes any columns of the IMAGE data type
- @ommit_identity bit = 0, -- Use this parameter to omit the identity columns
+ @ommit_identity bit = 0, -- Use this parameter to omit IDENTITY columns
  @top int = NULL, -- Use this parameter to generate a MERGE statement only for the TOP n rows
  @cols_to_include nvarchar(max) = NULL, -- List of columns to be included in the MERGE statement
  @cols_to_exclude nvarchar(max) = NULL, -- List of columns to be excluded from the MERGE statement
@@ -148,7 +148,7 @@ Example 7: To generate a MERGE statement excluding IMAGE data type columns:
 
   EXEC sp_generate_merge 'imgtable', @ommit_images = 1
 
-Example 8: To generate a MERGE statement excluding (omitting) IDENTITY columns:
+Example 8: To generate a MERGE statement excluding IDENTITY columns:
  (By default IDENTITY columns are included in the MERGE statement)
 
   EXEC sp_generate_merge 'mytable', @ommit_identity = 1
@@ -161,7 +161,7 @@ Example 10: To generate a MERGE statement with only those columns you want:
  
   EXEC sp_generate_merge 'titles', @cols_to_include = "'title','title_id','au_id'"
 
-Example 11: To generate a MERGE statement by omitting certain columns:
+Example 11: To generate a MERGE statement without one or more columns:
  
   EXEC sp_generate_merge 'titles', @cols_to_exclude = "'title','title_id','au_id'"
 
@@ -213,6 +213,12 @@ Example 19: To generate a MERGE split into batches based on a max rowcount per b
 ***********************************************************************************************************/
 
 SET NOCOUNT ON
+
+IF @include_timestamp=1
+BEGIN
+  RAISERROR('The @include_timestamp parameter is obsolete.', 16, 1)
+  RETURN -1 --Failure. Reason: Timestamp columns cannot be set by the user
+END
 
 --Making sure user only uses either @cols_to_include or @cols_to_exclude
 IF ((@cols_to_include IS NOT NULL) AND (@cols_to_exclude IS NOT NULL))
