@@ -347,6 +347,7 @@ DECLARE @Column_ID int,
  @Column_Name_Unquoted nvarchar(128), 
  @Data_Type nvarchar(128), 
  @Actual_Values nvarchar(max), --This is the string that will be finally executed to generate a MERGE statement
+ @Generate_Select_Delimiter nvarchar(max) = ' + '','' + ',
  @IDN nvarchar(128), --Will contain the IDENTITY column's name in the table
  @Target_Table_For_Output nvarchar(776),
  @Source_Table_Object_Id int,
@@ -487,7 +488,7 @@ BEGIN
   END
 
   --Serialise the data in the appropriate way for the given column's data type, while preserving column precision and accommodating for NULL values.
-  SET @Actual_Values +=
+  SET @Actual_Values += @b COLLATE DATABASE_DEFAULT +
     'COALESCE(' + (CASE 
       WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('char','nchar')                                                          THEN '''N'''''' + REPLACE(RTRIM(' + @Column_Name + '),'''''''','''''''''''')+'''''''''
       WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('varchar','nvarchar')                                                    THEN '''N'''''' + REPLACE(' + @Column_Name + ','''''''','''''''''''')+'''''''''
@@ -501,7 +502,8 @@ BEGIN
       WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('hierarchyid')                                                           THEN '''hierarchyid::Parse(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))+''''''''+'')'''
       WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('geography')                                                             THEN '''geography::STGeomFromText(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(nvarchar(max),' + @Column_Name + ')' + '))+''''''''+'', 4326)'''
       WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('geometry')                                                              THEN '''geometry::Parse(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(nvarchar(max),' + @Column_Name + ')' + '))+''''''''+'')'''
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('sql_variant')                                                           THEN 'CASE WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''varchar'',''nvarchar'')                                                          THEN ''N'''''' + REPLACE(CAST(' + @Column_Name + ' AS NVARCHAR(MAX)),'''''''','''''''''''')+'''''''' 
+      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('sql_variant')                                                           THEN '
+                                                                                                                                  CASE WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''varchar'',''nvarchar'')                                                          THEN ''N'''''' + REPLACE(CAST(' + @Column_Name + ' AS NVARCHAR(MAX)),'''''''','''''''''''')+'''''''' 
                                                                                                                                        WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''char'',''nchar'')                                                                THEN ''N'''''' + REPLACE(RTRIM(CAST(' + @Column_Name + ' AS NVARCHAR(MAX))),'''''''','''''''''''')+''''''''
                                                                                                                                        WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''datetime'',''smalldatetime'',''datetime2'',''date'',''datetimeoffset'',''time'') THEN ''''''''  + RTRIM(CONVERT(char,' + @Column_Name + ',127))+''''''''
                                                                                                                                        WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''uniqueidentifier'')                                                              THEN ''N'''''' + REPLACE(CONVERT(char(36),RTRIM(CAST(' + @Column_Name + ' AS NVARCHAR(MAX)))),'''''''','''''''''''')+''''''''
@@ -509,7 +511,7 @@ BEGIN
                                                                                                                                        ELSE LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + ')) 
                                                                                                                                   END'
       ELSE                                                                                                                       'LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))' 
-    END) + ',''NULL'')' + '+' + ''',''' + ' + '
+    END) + ',''NULL'')' + @Generate_Select_Delimiter COLLATE DATABASE_DEFAULT
   
   --Add the column to the list to be serialised, unless it is the @hash_compare_column
   IF @hash_compare_column IS NULL OR @Column_Name <> QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
@@ -568,24 +570,24 @@ END --WHILE LOOP END
 --Get rid of the extra characters that got concatenated during the last run through the loop
 IF LEN(@Column_List_For_Update) <> 0
  BEGIN
- SET @Column_List_For_Update = ' ' + LEFT(@Column_List_For_Update,len(@Column_List_For_Update) - 2 - LEN(@b))
+ SET @Column_List_For_Update = ' ' + LEFT(@Column_List_For_Update,LEN(@Column_List_For_Update) - 2 - LEN(@b))
  END
 
 IF LEN(@Column_List_For_Check) <> 0
  BEGIN
- SET @Column_List_For_Check = LEFT(@Column_List_For_Check,len(@Column_List_For_Check) - 2 - LEN(@b))
+ SET @Column_List_For_Check = LEFT(@Column_List_For_Check,LEN(@Column_List_For_Check) - 2 - LEN(@b))
  END
 
-SET @Actual_Values = LEFT(@Actual_Values,len(@Actual_Values) - 6)
+SET @Actual_Values = LEFT(@Actual_Values,LEN(@Actual_Values) - LEN(@Generate_Select_Delimiter)) + @b COLLATE DATABASE_DEFAULT
 
-SET @Column_List = LEFT(@Column_List,len(@Column_List) - 1)
+SET @Column_List = LEFT(@Column_List,LEN(@Column_List) - 1)
 IF LEN(LTRIM(@Column_List)) = 0
  BEGIN
  RAISERROR('No columns to select. There should at least be one column to generate the output',16,1)
  RETURN -1 --Failure. Reason: Looks like all the columns are ommitted using the @cols_to_exclude parameter
  END
 
-SET @Column_List_Insert_Values = LEFT(@Column_List_Insert_Values,len(@Column_List_Insert_Values) - 1)
+SET @Column_List_Insert_Values = LEFT(@Column_List_Insert_Values,LEN(@Column_List_Insert_Values) - 1)
 
 --Get the join columns ----------------------------------------------------------
 DECLARE @PK_column_list NVARCHAR(max)
@@ -631,7 +633,7 @@ SET @PK_column_joins = LEFT(@PK_column_joins, LEN(@PK_column_joins) -4)
 SET @Actual_Values = 
  'SELECT ' + 
  CASE WHEN @top IS NULL OR @top < 0 THEN '' ELSE ' TOP ' + LTRIM(STR(@top)) + ' ' END + 
- '''''+''(''+' + @Actual_Values COLLATE DATABASE_DEFAULT + '+'')''' + 
+ '''''+''(''+' + @Actual_Values COLLATE DATABASE_DEFAULT + '+'')''' + @b COLLATE DATABASE_DEFAULT +
  COALESCE(@from,' FROM ' + @Source_Table_Qualified COLLATE DATABASE_DEFAULT + ' (NOLOCK) ORDER BY ' + @PK_column_list COLLATE DATABASE_DEFAULT)
 
  SET @output = CASE WHEN ISNULL(@results_to_text, 1) = 1 THEN '' ELSE '---' END
