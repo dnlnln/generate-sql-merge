@@ -548,16 +548,16 @@ BEGIN
   BEGIN
     DECLARE @Source_Column_Spec NVARCHAR(128) = CASE @Data_Type COLLATE DATABASE_DEFAULT WHEN 'xml' THEN N'CONVERT(xml, [Source].' + @Column_Name + ')' ELSE '[Source].' + @Column_Name END
     SET @Column_List_For_Update += '[Target].' + @Column_Name + ' = ' + @Source_Column_Spec + ', ' + @b COLLATE DATABASE_DEFAULT + '  '
-    SET @Column_List_For_Check += @b COLLATE DATABASE_DEFAULT + CHAR(9) + 
+    SET @Column_List_For_Check +=
       CASE @Data_Type COLLATE DATABASE_DEFAULT
-        WHEN 'text'      THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL'
-        WHEN 'ntext'     THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL' 
-        WHEN 'xml'       THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL' 
-        WHEN 'image'     THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARBINARY(MAX)), CAST([Target].' + @Column_Name + ' AS VARBINARY(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARBINARY(MAX)), CAST([Source].' + @Column_Name + ' AS VARBINARY(MAX))) IS NOT NULL' 
-        WHEN 'geography' THEN '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geography::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0)'
-        WHEN 'geometry'  THEN '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geometry::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0)'
-        ELSE                  'NULLIF([Source].' + @Column_Name + ', [Target].' + @Column_Name + ') IS NOT NULL OR NULLIF([Target].' + @Column_Name + ', [Source].' + @Column_Name + ') IS NOT NULL'
-      END + ' OR '
+        WHEN 'text'      THEN 'CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))'
+        WHEN 'ntext'     THEN 'CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))'
+        WHEN 'xml'       THEN 'CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))'
+        WHEN 'image'     THEN 'CAST([Source].' + @Column_Name + ' AS VARBINARY(MAX))'
+        WHEN 'geography' THEN 'CASE WHEN ((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geography::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) THEN 1 ELSE 0 END'
+        WHEN 'geometry'  THEN 'CASE WHEN ((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geometry::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) THEN 1 ELSE 0 END'
+        ELSE '[Source].' + @Column_Name
+      END + ', '
   END
 
   SKIP_LOOP: --The label used in GOTO
@@ -579,7 +579,7 @@ IF LEN(@Column_List_For_Update) <> 0
 
 IF LEN(@Column_List_For_Check) <> 0
  BEGIN
- SET @Column_List_For_Check = LEFT(@Column_List_For_Check,LEN(@Column_List_For_Check) - 2 - LEN(@b))
+ SET @Column_List_For_Check = LEFT(@Column_List_For_Check,LEN(@Column_List_For_Check) - 1)
  END
 
 SET @Actual_Values = LEFT(@Actual_Values,LEN(@Actual_Values) - LEN(@Generate_Select_Delimiter)) + @b COLLATE DATABASE_DEFAULT
@@ -843,7 +843,11 @@ BEGIN
 	 CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL
 	 THEN 'AND ([Target].' + QUOTENAME(@hash_compare_column) +' <> [Source].' + QUOTENAME(@hash_compare_column) + ' OR [Target].' + QUOTENAME(@hash_compare_column) + ' IS NULL) '
 	 ELSE CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NULL THEN
-	 'AND (' + @Column_List_For_Check + ') ' ELSE '' END END + 'THEN'
+	  'AND EXISTS ' 
+      + @b COLLATE DATABASE_DEFAULT + '    (SELECT ' +  @Column_List_For_Check
+	    + @b COLLATE DATABASE_DEFAULT + '     EXCEPT' 
+      + @b COLLATE DATABASE_DEFAULT + '     SELECT ' + REPLACE(@Column_List_For_Check, '[Source]','[Target]') + ') '
+  ELSE '' END END + 'THEN'
  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' UPDATE SET'
  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + '  ' + LTRIM(@Column_List_For_Update COLLATE DATABASE_DEFAULT)
 END
