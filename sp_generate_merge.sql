@@ -790,7 +790,7 @@ END
 DECLARE @outputMergeBatch nvarchar(max), @ValuesListTotalCount int;
 
 --Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
-SET @outputMergeBatch = @b COLLATE DATABASE_DEFAULT + 'MERGE INTO ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' AS [Target]'
+SET @outputMergeBatch = @b COLLATE DATABASE_DEFAULT + 'MERGE INTO ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' WITH (SERIALIZABLE) AS [Target]'
 DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max));
 
 IF @include_values = 1
