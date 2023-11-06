@@ -804,35 +804,37 @@ DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max)
 
 IF @include_values = 1
 BEGIN
- SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING ('
- --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
- INSERT INTO @tab (val)
- EXEC (@Actual_Values)
+  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING ('
+  --Generate the complete MERGE statement
+  INSERT INTO @tab (val)
+  EXEC (@Actual_Values)
 
- SET @ValuesListTotalCount = @@ROWCOUNT;
+  SET @ValuesListTotalCount = @@ROWCOUNT;
 
- IF @ValuesListTotalCount <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
- BEGIN
-  SET @outputMergeBatch += 'VALUES{{ValuesList}}';
- END
- ELSE
- BEGIN
-  -- Mimic an empty result set by returning zero rows from the target table
-  SET @outputMergeBatch += 'SELECT ' + @Column_List COLLATE DATABASE_DEFAULT + ' FROM ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' WHERE 1 = 0 -- Empty dataset (source table contained no rows at time of MERGE generation) '
- END
+  IF @ValuesListTotalCount <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
+  BEGIN
+    SET @outputMergeBatch += 'VALUES{{ValuesList}}';
+  END
+  ELSE
+  BEGIN
+    -- Mimic an empty result set by returning zero rows from the target table
+    SET @outputMergeBatch += 'SELECT ' + @Column_List COLLATE DATABASE_DEFAULT + ' FROM ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' WHERE 1 = 0 -- Empty dataset (source table contained no rows at time of MERGE generation) '
+  END
 
- --output the columns to correspond with each of the values above--------------------
- SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ') AS [Source] (' + @Column_List COLLATE DATABASE_DEFAULT + ')'
+  --output the columns to correspond with each of the values above--------------------
+  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ') AS [Source] (' + @Column_List COLLATE DATABASE_DEFAULT + ')'
 END
 ELSE
- IF @hash_compare_column IS NULL
- BEGIN
-  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ' AS [Source]';
- END
- ELSE
- BEGIN
-  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING (SELECT ' + @Column_List COLLATE DATABASE_DEFAULT + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(@Column_List COLLATE DATABASE_DEFAULT,'],[','],''|'',[') +')) AS [' + @hash_compare_column COLLATE DATABASE_DEFAULT  + '] FROM ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ') AS [Source]'
- END
+BEGIN
+  IF @hash_compare_column IS NULL
+  BEGIN
+    SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ' AS [Source]';
+  END
+  ELSE
+  BEGIN
+    SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING (SELECT ' + @Column_List COLLATE DATABASE_DEFAULT + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(REPLACE(@Column_List_For_HashCompare COLLATE DATABASE_DEFAULT,'],[','],''|'',['), ']),', ']),''|'',') +')) AS [' + @hash_compare_column COLLATE DATABASE_DEFAULT  + '] FROM ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ') AS [Source]'
+  END
+END
 
 --Output the join columns ----------------------------------------------------------
 SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'ON (' + @PK_column_joins COLLATE DATABASE_DEFAULT + ')'
