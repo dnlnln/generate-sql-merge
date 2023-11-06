@@ -866,24 +866,24 @@ SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'ON (' + @PK_column_joins
 --When matched, perform an UPDATE on any metadata columns only (ie. not on PK)------
 IF LEN(@Column_List_For_Update) <> 0 AND @update_existing = 1
 BEGIN
- --Adding column @hash_compare_column to @ColumnList and @Column_List_For_Update if @hash_compare_column is not null
- IF @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL AND @SourceHashColumn = 0
- BEGIN
-  SET @Column_List_Insert_Values += ',' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
-	SET @Column_List_For_Update += ',' + @b COLLATE DATABASE_DEFAULT + '  [Target].' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT) +' = [Source].' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
-	SET @Column_List += ',' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
- END
- SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'WHEN MATCHED ' +
-	 CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL
-	 THEN 'AND ([Target].' + QUOTENAME(@hash_compare_column) +' <> [Source].' + QUOTENAME(@hash_compare_column) + ' OR [Target].' + QUOTENAME(@hash_compare_column) + ' IS NULL) '
-	 ELSE CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NULL THEN
-	  'AND EXISTS ' 
+  --Adding column @hash_compare_column to @ColumnList and @Column_List_For_Update if @hash_compare_column is not null
+  IF @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL AND @SourceHashColumn = 0
+  BEGIN
+    SET @Column_List_Insert_Values += ',' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
+    SET @Column_List_For_Update += ',' + @b COLLATE DATABASE_DEFAULT + '  [Target].' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT) +' = [Source].' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
+    SET @Column_List += ',' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
+  END
+  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'WHEN MATCHED ' +
+    CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL THEN 
+      'AND ([Target].' + QUOTENAME(@hash_compare_column) +' <> [Source].' + QUOTENAME(@hash_compare_column) + ' OR [Target].' + QUOTENAME(@hash_compare_column) + ' IS NULL) '
+    ELSE 
+      CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NULL THEN 
       + @b COLLATE DATABASE_DEFAULT + '    (SELECT ' +  @Column_List_For_Check
 	    + @b COLLATE DATABASE_DEFAULT + '     EXCEPT' 
       + @b COLLATE DATABASE_DEFAULT + '     SELECT ' + REPLACE(@Column_List_For_Check, '[Source]','[Target]') + ') '
-  ELSE '' END END + 'THEN'
- SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' UPDATE SET'
- SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + '  ' + LTRIM(@Column_List_For_Update COLLATE DATABASE_DEFAULT)
+    END + 'THEN' 
+  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' UPDATE SET'
+  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + '  ' + LTRIM(@Column_List_For_Update COLLATE DATABASE_DEFAULT)
 END
 
 
