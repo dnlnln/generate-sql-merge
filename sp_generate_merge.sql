@@ -878,9 +878,9 @@ BEGIN
       'AND ([Target].' + QUOTENAME(@hash_compare_column) +' <> [Source].' + QUOTENAME(@hash_compare_column) + ' OR [Target].' + QUOTENAME(@hash_compare_column) + ' IS NULL) '
     ELSE 
       CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NULL THEN 
-      + @b COLLATE DATABASE_DEFAULT + '    (SELECT ' +  @Column_List_For_Check
-	    + @b COLLATE DATABASE_DEFAULT + '     EXCEPT' 
-      + @b COLLATE DATABASE_DEFAULT + '     SELECT ' + REPLACE(@Column_List_For_Check, '[Source]','[Target]') + ') '
+        'AND EXISTS (SELECT ' +  @Column_List_For_Check 
+        + @b COLLATE DATABASE_DEFAULT + '                 EXCEPT  SELECT ' + REPLACE(@Column_List_For_Check, '[Source]','[Target]') + ') '
+      ELSE '' END 
     END + 'THEN' 
   SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' UPDATE SET'
   SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + '  ' + LTRIM(@Column_List_For_Update COLLATE DATABASE_DEFAULT)
