@@ -343,6 +343,7 @@ DECLARE @Column_ID int,
  @Column_List_Insert_Values nvarchar(max),
  @Column_List_For_Update nvarchar(max), 
  @Column_List_For_Check nvarchar(max), 
+ @Column_List_For_HashCompare nvarchar(max), 
  @Column_Name nvarchar(128), 
  @Column_Name_Unquoted nvarchar(128), 
  @Data_Type nvarchar(128), 
@@ -386,6 +387,7 @@ SET @Column_List_Insert_Values = ''
 SET @Column_List_For_Update = ''
 SET @Column_List_For_Check = ''
 SET @Actual_Values = ''
+SET @Column_List_For_HashCompare = '' 
 
 --Variable Defaults
 IF @target_table IS NOT NULL AND (@target_table LIKE '%.%' COLLATE DATABASE_DEFAULT OR @target_table LIKE '\[%\]' COLLATE DATABASE_DEFAULT ESCAPE '\')
@@ -529,6 +531,8 @@ BEGIN
   --Add the column to the list to be serialised, unless it is the @hash_compare_column
   IF @hash_compare_column IS NULL OR @Column_Name <> QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
   BEGIN
+    DECLARE @Column_Name_HashCompare NVARCHAR(128) = CASE WHEN @Data_Type COLLATE DATABASE_DEFAULT = 'xml' AND @hash_compare_column IS NOT NULL THEN 'CONVERT(nvarchar(max),' + @Column_Name +')' ELSE @Column_Name END
+    SET @Column_List_For_HashCompare += @Column_Name_HashCompare + ','
     SET @Column_List += @Column_Name + ','
     DECLARE @Insert_Column_Spec NVARCHAR(128) = CASE WHEN @Data_Type COLLATE DATABASE_DEFAULT = 'xml' THEN N'CONVERT(xml, ' + @Column_Name + ')' ELSE @Column_Name END
     SET @Column_List_Insert_Values += @Insert_Column_Spec + ','
@@ -601,6 +605,11 @@ IF LEN(LTRIM(@Column_List)) = 0
  END
 
 SET @Column_List_Insert_Values = LEFT(@Column_List_Insert_Values,LEN(@Column_List_Insert_Values) - 1)
+
+IF LEN(@Column_List_For_HashCompare) <> 0
+BEGIN
+  SET @Column_List_For_HashCompare = LEFT(@Column_List_For_HashCompare,LEN(@Column_List_For_HashCompare) - 1)
+END
 
 --Get the join columns ----------------------------------------------------------
 DECLARE @PK_column_list NVARCHAR(max)
@@ -828,11 +837,25 @@ ELSE
 BEGIN
   IF @hash_compare_column IS NULL
   BEGIN
-    SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ' AS [Source]';
+    IF @top IS NULL OR @top < 0
+    BEGIN
+      SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ' AS [Source]';
+    END
+    ELSE  --add 'TOP'-clause
+    BEGIN
+      SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING (SELECT TOP ' + LTRIM(@top) + ' * FROM ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ') AS [Source]';
+    END
   END
   ELSE
   BEGIN
-    SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING (SELECT ' + @Column_List COLLATE DATABASE_DEFAULT + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(REPLACE(@Column_List_For_HashCompare COLLATE DATABASE_DEFAULT,'],[','],''|'',['), ']),', ']),''|'',') +')) AS [' + @hash_compare_column COLLATE DATABASE_DEFAULT  + '] FROM ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ') AS [Source]'
+    IF @top IS NULL OR @top < 0
+    BEGIN
+      SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING (SELECT ' + @Column_List COLLATE DATABASE_DEFAULT + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(REPLACE(@Column_List_For_HashCompare COLLATE DATABASE_DEFAULT,'],[','],''|'',['), ']),', ']),''|'',') +')) AS [' + @hash_compare_column COLLATE DATABASE_DEFAULT  + '] FROM ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ') AS [Source]';
+    END
+    ELSE  --add 'TOP'-clause
+    BEGIN
+      SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING (SELECT TOP ' + LTRIM(@top) + ' ' + @Column_List COLLATE DATABASE_DEFAULT + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(REPLACE(@Column_List_For_HashCompare COLLATE DATABASE_DEFAULT,'],[','],''|'',['), ']),', ']),''|'',') +')) AS [' + @hash_compare_column COLLATE DATABASE_DEFAULT  + '] FROM ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ') AS [Source]';
+    END
   END
 END
 
