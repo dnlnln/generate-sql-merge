@@ -343,6 +343,7 @@ DECLARE @Column_ID int,
  @Column_List_Insert_Values nvarchar(max),
  @Column_List_For_Update nvarchar(max), 
  @Column_List_For_Check nvarchar(max), 
+ @Column_List_For_HashCompare nvarchar(max), 
  @Column_Name nvarchar(128), 
  @Column_Name_Unquoted nvarchar(128), 
  @Data_Type nvarchar(128), 
@@ -386,6 +387,7 @@ SET @Column_List_Insert_Values = ''
 SET @Column_List_For_Update = ''
 SET @Column_List_For_Check = ''
 SET @Actual_Values = ''
+SET @Column_List_For_HashCompare = '' 
 
 --Variable Defaults
 IF @target_table IS NOT NULL AND (@target_table LIKE '%.%' COLLATE DATABASE_DEFAULT OR @target_table LIKE '\[%\]' COLLATE DATABASE_DEFAULT ESCAPE '\')
@@ -488,38 +490,49 @@ BEGIN
   END
 
   --Serialise the data in the appropriate way for the given column's data type, while preserving column precision and accommodating for NULL values.
-  SET @Actual_Values += @b COLLATE DATABASE_DEFAULT +
-    'COALESCE(' + (CASE 
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('char','nchar')                                                          THEN '''N'''''' + REPLACE(RTRIM(' + @Column_Name + '),'''''''','''''''''''')+'''''''''
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('varchar','nvarchar')                                                    THEN '''N'''''' + REPLACE(' + @Column_Name + ','''''''','''''''''''')+'''''''''
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('datetime','smalldatetime','datetime2','date','datetimeoffset','time')   THEN '''''''''  + RTRIM(CONVERT(char,' + @Column_Name + ',127))+'''''''''
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('uniqueidentifier')                                                      THEN '''N'''''' + REPLACE(CONVERT(char(36),RTRIM(' + @Column_Name + ')),'''''''','''''''''''')+'''''''''
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('text')                                                                  THEN '''N'''''' + REPLACE(CONVERT(varchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''''
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('ntext','xml')                                                           THEN '''''''''  + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''''
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('binary','varbinary')                                                    THEN 'RTRIM(CONVERT(varchar(max),' + @Column_Name + ', 1))'
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('image')                                                                 THEN 'RTRIM(CONVERT(varchar(max), CONVERT(varbinary(max), ' + @Column_Name + ', 1), 1))'
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('float','real','money','smallmoney')                                     THEN 'LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ',2)' + '))'
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('hierarchyid')                                                           THEN '''hierarchyid::Parse(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))+''''''''+'')'''
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('geography')                                                             THEN '''geography::STGeomFromText(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(nvarchar(max),' + @Column_Name + ')' + '))+''''''''+'', 4326)'''
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('geometry')                                                              THEN '''geometry::Parse(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(nvarchar(max),' + @Column_Name + ')' + '))+''''''''+'')'''
-      WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('sql_variant')                                                           THEN '''CAST('' +
-                                                                                                                                  CASE WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''varchar'',''nvarchar'')                                                          THEN ''N'''''' + REPLACE(CAST(' + @Column_Name + ' AS NVARCHAR(MAX)),'''''''','''''''''''')+'''''''' 
-                                                                                                                                       WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''char'',''nchar'')                                                                THEN ''N'''''' + REPLACE(RTRIM(CAST(' + @Column_Name + ' AS NVARCHAR(MAX))),'''''''','''''''''''')+''''''''
-                                                                                                                                       WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''datetime'',''smalldatetime'',''datetime2'',''date'',''datetimeoffset'',''time'') THEN ''''''''  + RTRIM(CONVERT(char,' + @Column_Name + ',127))+''''''''
-                                                                                                                                       WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''uniqueidentifier'')                                                              THEN ''N'''''' + REPLACE(CONVERT(char(36),RTRIM(CAST(' + @Column_Name + ' AS NVARCHAR(MAX)))),'''''''','''''''''''')+''''''''
-                                                                                                                                       WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''float'',''real'',''money'',''smallmoney'')                                       THEN LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ',2)' + '))
-                                                                                                                                       ELSE LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))
-                                                                                                                                  END + '' AS '' + CAST(SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') AS NVARCHAR(MAX)) + (
-                                                                                                                                  CASE WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''char'',''nchar'',''varchar'',''nvarchar'',''binary'',''varbinary'')              THEN ''('' + CAST(SQL_VARIANT_PROPERTY(' + @Column_Name + ',''MaxLength'') AS NVARCHAR(MAX)) + '')''
-                                                                                                                                       WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''decimal'',''numeric'')                                                           THEN ''('' + CAST(SQL_VARIANT_PROPERTY(' + @Column_Name + ',''Precision'') AS NVARCHAR(MAX)) + '','' + CAST(SQL_VARIANT_PROPERTY(' + @Column_Name + ',''Precision'') AS NVARCHAR(MAX)) + '')''
-                                                                                                                                  ELSE ''''
-                                                                                                                                  END) + '')'''
-      ELSE                                                                                                                       'LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))' 
-    END) + ',''NULL'')' + @Generate_Select_Delimiter COLLATE DATABASE_DEFAULT
+  DECLARE @Column_Value_Selector NVARCHAR(MAX) = CASE 
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('char')                                                                  THEN ''''''''' +  REPLACE(RTRIM(' + @Column_Name + '),'''''''','''''''''''')+'''''''''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('nchar')                                                                 THEN '''N'''''' + REPLACE(RTRIM(' + @Column_Name + '),'''''''','''''''''''')+'''''''''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('varchar')                                                               THEN '''''''''  + REPLACE(' + @Column_Name + ','''''''','''''''''''')+'''''''''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('nvarchar')                                                              THEN '''N'''''' + REPLACE(' + @Column_Name + ','''''''','''''''''''')+'''''''''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('datetime','smalldatetime','datetime2','date','datetimeoffset','time')   THEN '''''''''  + RTRIM(CONVERT(char,' + @Column_Name + ',127))+'''''''''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('uniqueidentifier')                                                      THEN '''''''''  + REPLACE(CONVERT(char(36),RTRIM(' + @Column_Name + ')),'''''''','''''''''''')+'''''''''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('text')                                                                  THEN '''''''''  + REPLACE(CONVERT(varchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('ntext')                                                                 THEN '''N'''''' + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('xml')                                                                   THEN '''CAST(N'''''' + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''' AS XML)'''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('binary','varbinary')                                                    THEN 'RTRIM(CONVERT(varchar(max),' + @Column_Name + ', 1))'
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('image')                                                                 THEN 'RTRIM(CONVERT(varchar(max), CONVERT(varbinary(max), ' + @Column_Name + ', 1), 1))'
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('float','real','money','smallmoney')                                     THEN 'LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ',2)' + '))'
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('hierarchyid')                                                           THEN '''hierarchyid::Parse(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))+''''''''+'')'''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('geography')                                                             THEN '''geography::STGeomFromText(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(nvarchar(max),' + @Column_Name + ')' + '))+''''''''+'', 4326)'''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('geometry')                                                              THEN '''geometry::Parse(''+'''''''' + LTRIM(RTRIM(' + 'CONVERT(nvarchar(max),' + @Column_Name + ')' + '))+''''''''+'')'''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('sql_variant')                                                           THEN '''CAST('' +
+                                                                                                                                CASE WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''varchar'')                                                                       THEN ''''''''  + REPLACE(CAST(' + @Column_Name + ' AS VARCHAR(MAX)),'''''''','''''''''''')+'''''''' 
+                                                                                                                                     WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''nvarchar'')                                                                      THEN ''N'''''' + REPLACE(CAST(' + @Column_Name + ' AS NVARCHAR(MAX)),'''''''','''''''''''')+'''''''' 
+                                                                                                                                     WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''char'')                                                                          THEN ''''''''  + REPLACE(RTRIM(CAST(' + @Column_Name + ' AS VARCHAR(MAX))),'''''''','''''''''''')+''''''''
+                                                                                                                                     WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''nchar'')                                                                         THEN ''N'''''' + REPLACE(RTRIM(CAST(' + @Column_Name + ' AS NVARCHAR(MAX))),'''''''','''''''''''')+''''''''
+                                                                                                                                     WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''datetime'',''smalldatetime'',''datetime2'',''date'',''datetimeoffset'',''time'') THEN ''''''''  + RTRIM(CONVERT(char,' + @Column_Name + ',127))+''''''''
+                                                                                                                                     WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''uniqueidentifier'')                                                              THEN ''''''''  + REPLACE(CONVERT(char(36),RTRIM(CAST(' + @Column_Name + ' AS VARCHAR(MAX)))),'''''''','''''''''''')+''''''''
+                                                                                                                                     WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''float'',''real'',''money'',''smallmoney'')                                       THEN LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ',2)' + '))
+                                                                                                                                     ELSE LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))
+                                                                                                                                END + '' AS '' + CAST(SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') AS NVARCHAR(MAX)) + (
+                                                                                                                                CASE WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''char'',''nchar'',''varchar'',''nvarchar'',''binary'',''varbinary'')              THEN ''('' + CAST(SQL_VARIANT_PROPERTY(' + @Column_Name + ',''MaxLength'') AS NVARCHAR(MAX)) + '')''
+                                                                                                                                     WHEN SQL_VARIANT_PROPERTY(' + @Column_Name + ',''BaseType'') IN (''decimal'',''numeric'')                                                           THEN ''('' + CAST(SQL_VARIANT_PROPERTY(' + @Column_Name + ',''Precision'') AS NVARCHAR(MAX)) + '','' + CAST(SQL_VARIANT_PROPERTY(' + @Column_Name + ',''Precision'') AS NVARCHAR(MAX)) + '')''
+                                                                                                                                ELSE ''''
+                                                                                                                                END) + '')'''
+    ELSE                                                                                                                       'LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))' 
+  END
+  IF @results_to_text = 0 AND @Data_Type IN ('xml','char','nchar','varchar','nvarchar','text','ntext','sql_variant') -- Workaround for SSMS quirk where any occurrences of "?>" are replaced with "? >" in the output grid
+  BEGIN
+    SET @Column_Value_Selector = 'REPLACE(' + @Column_Value_Selector + ',''?>'',''?''''+''''>'')';
+  END
+  SET @Actual_Values += @b COLLATE DATABASE_DEFAULT + 'COALESCE(' + @Column_Value_Selector + ',''NULL'')' + @Generate_Select_Delimiter COLLATE DATABASE_DEFAULT
   
   --Add the column to the list to be serialised, unless it is the @hash_compare_column
   IF @hash_compare_column IS NULL OR @Column_Name <> QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
   BEGIN
+    DECLARE @Column_Name_HashCompare NVARCHAR(128) = CASE WHEN @Data_Type COLLATE DATABASE_DEFAULT = 'xml' AND @hash_compare_column IS NOT NULL THEN 'CONVERT(nvarchar(max),' + @Column_Name +')' ELSE @Column_Name END
+    SET @Column_List_For_HashCompare += @Column_Name_HashCompare + ','
     SET @Column_List += @Column_Name + ','
     DECLARE @Insert_Column_Spec NVARCHAR(128) = CASE WHEN @Data_Type COLLATE DATABASE_DEFAULT = 'xml' THEN N'CONVERT(xml, ' + @Column_Name + ')' ELSE @Column_Name END
     SET @Column_List_Insert_Values += @Insert_Column_Spec + ','
@@ -548,16 +561,16 @@ BEGIN
   BEGIN
     DECLARE @Source_Column_Spec NVARCHAR(128) = CASE @Data_Type COLLATE DATABASE_DEFAULT WHEN 'xml' THEN N'CONVERT(xml, [Source].' + @Column_Name + ')' ELSE '[Source].' + @Column_Name END
     SET @Column_List_For_Update += '[Target].' + @Column_Name + ' = ' + @Source_Column_Spec + ', ' + @b COLLATE DATABASE_DEFAULT + '  '
-    SET @Column_List_For_Check += @b COLLATE DATABASE_DEFAULT + CHAR(9) + 
+    SET @Column_List_For_Check +=
       CASE @Data_Type COLLATE DATABASE_DEFAULT
-        WHEN 'text'      THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))) IS NOT NULL'
-        WHEN 'ntext'     THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL' 
-        WHEN 'xml'       THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS NVARCHAR(MAX)), CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))) IS NOT NULL' 
-        WHEN 'image'     THEN 'NULLIF(CAST([Source].' + @Column_Name + ' AS VARBINARY(MAX)), CAST([Target].' + @Column_Name + ' AS VARBINARY(MAX))) IS NOT NULL OR NULLIF(CAST([Target].' + @Column_Name + ' AS VARBINARY(MAX)), CAST([Source].' + @Column_Name + ' AS VARBINARY(MAX))) IS NOT NULL' 
-        WHEN 'geography' THEN '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geography::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0)'
-        WHEN 'geometry'  THEN '((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geometry::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0)'
-        ELSE                  'NULLIF([Source].' + @Column_Name + ', [Target].' + @Column_Name + ') IS NOT NULL OR NULLIF([Target].' + @Column_Name + ', [Source].' + @Column_Name + ') IS NOT NULL'
-      END + ' OR '
+        WHEN 'text'      THEN 'CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))'
+        WHEN 'ntext'     THEN 'CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))'
+        WHEN 'xml'       THEN 'CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))'
+        WHEN 'image'     THEN 'CAST([Source].' + @Column_Name + ' AS VARBINARY(MAX))'
+        WHEN 'geography' THEN 'CASE WHEN ((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geography::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) THEN 1 ELSE 0 END'
+        WHEN 'geometry'  THEN 'CASE WHEN ((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geometry::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) THEN 1 ELSE 0 END'
+        ELSE '[Source].' + @Column_Name
+      END + ', '
   END
 
   SKIP_LOOP: --The label used in GOTO
@@ -579,7 +592,7 @@ IF LEN(@Column_List_For_Update) <> 0
 
 IF LEN(@Column_List_For_Check) <> 0
  BEGIN
- SET @Column_List_For_Check = LEFT(@Column_List_For_Check,LEN(@Column_List_For_Check) - 2 - LEN(@b))
+ SET @Column_List_For_Check = LEFT(@Column_List_For_Check,LEN(@Column_List_For_Check) - 1)
  END
 
 SET @Actual_Values = LEFT(@Actual_Values,LEN(@Actual_Values) - LEN(@Generate_Select_Delimiter)) + @b COLLATE DATABASE_DEFAULT
@@ -592,6 +605,11 @@ IF LEN(LTRIM(@Column_List)) = 0
  END
 
 SET @Column_List_Insert_Values = LEFT(@Column_List_Insert_Values,LEN(@Column_List_Insert_Values) - 1)
+
+IF LEN(@Column_List_For_HashCompare) <> 0
+BEGIN
+  SET @Column_List_For_HashCompare = LEFT(@Column_List_For_HashCompare,LEN(@Column_List_For_HashCompare) - 1)
+END
 
 --Get the join columns ----------------------------------------------------------
 DECLARE @PK_column_list NVARCHAR(max)
@@ -795,35 +813,51 @@ DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max)
 
 IF @include_values = 1
 BEGIN
- SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING ('
- --All the hard work pays off here!!! You'll get your MERGE statement, when the next line executes!
- INSERT INTO @tab (val)
- EXEC (@Actual_Values)
+  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING ('
+  --Generate the complete MERGE statement
+  INSERT INTO @tab (val)
+  EXEC (@Actual_Values)
 
- SET @ValuesListTotalCount = @@ROWCOUNT;
+  SET @ValuesListTotalCount = @@ROWCOUNT;
 
- IF @ValuesListTotalCount <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
- BEGIN
-  SET @outputMergeBatch += 'VALUES{{ValuesList}}';
- END
- ELSE
- BEGIN
-  -- Mimic an empty result set by returning zero rows from the target table
-  SET @outputMergeBatch += 'SELECT ' + @Column_List COLLATE DATABASE_DEFAULT + ' FROM ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' WHERE 1 = 0 -- Empty dataset (source table contained no rows at time of MERGE generation) '
- END
+  IF @ValuesListTotalCount <> 0 -- Ensure that rows were returned, otherwise the MERGE statement will get nullified.
+  BEGIN
+    SET @outputMergeBatch += 'VALUES{{ValuesList}}';
+  END
+  ELSE
+  BEGIN
+    -- Mimic an empty result set by returning zero rows from the target table
+    SET @outputMergeBatch += 'SELECT ' + @Column_List COLLATE DATABASE_DEFAULT + ' FROM ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' WHERE 1 = 0 -- Empty dataset (source table contained no rows at time of MERGE generation) '
+  END
 
- --output the columns to correspond with each of the values above--------------------
- SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ') AS [Source] (' + @Column_List COLLATE DATABASE_DEFAULT + ')'
+  --output the columns to correspond with each of the values above--------------------
+  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ') AS [Source] (' + @Column_List COLLATE DATABASE_DEFAULT + ')'
 END
 ELSE
- IF @hash_compare_column IS NULL
- BEGIN
-  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ' AS [Source]';
- END
- ELSE
- BEGIN
-  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING (SELECT ' + @Column_List COLLATE DATABASE_DEFAULT + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(@Column_List COLLATE DATABASE_DEFAULT,'],[','],''|'',[') +')) AS [' + @hash_compare_column COLLATE DATABASE_DEFAULT  + '] FROM ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ') AS [Source]'
- END
+BEGIN
+  IF @hash_compare_column IS NULL
+  BEGIN
+    IF @top IS NULL OR @top < 0
+    BEGIN
+      SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ' AS [Source]';
+    END
+    ELSE  --add 'TOP'-clause
+    BEGIN
+      SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING (SELECT TOP ' + LTRIM(@top) + ' * FROM ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ') AS [Source]';
+    END
+  END
+  ELSE
+  BEGIN
+    IF @top IS NULL OR @top < 0
+    BEGIN
+      SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING (SELECT ' + @Column_List COLLATE DATABASE_DEFAULT + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(REPLACE(@Column_List_For_HashCompare COLLATE DATABASE_DEFAULT,'],[','],''|'',['), ']),', ']),''|'',') +')) AS [' + @hash_compare_column COLLATE DATABASE_DEFAULT  + '] FROM ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ') AS [Source]';
+    END
+    ELSE  --add 'TOP'-clause
+    BEGIN
+      SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'USING (SELECT TOP ' + LTRIM(@top) + ' ' + @Column_List COLLATE DATABASE_DEFAULT + ', HASHBYTES(''SHA2_256'', CONCAT(' + REPLACE(REPLACE(@Column_List_For_HashCompare COLLATE DATABASE_DEFAULT,'],[','],''|'',['), ']),', ']),''|'',') +')) AS [' + @hash_compare_column COLLATE DATABASE_DEFAULT  + '] FROM ' + @Source_Table_For_Output COLLATE DATABASE_DEFAULT + ') AS [Source]';
+    END
+  END
+END
 
 --Output the join columns ----------------------------------------------------------
 SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'ON (' + @PK_column_joins COLLATE DATABASE_DEFAULT + ')'
@@ -832,20 +866,24 @@ SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'ON (' + @PK_column_joins
 --When matched, perform an UPDATE on any metadata columns only (ie. not on PK)------
 IF LEN(@Column_List_For_Update) <> 0 AND @update_existing = 1
 BEGIN
- --Adding column @hash_compare_column to @ColumnList and @Column_List_For_Update if @hash_compare_column is not null
- IF @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL AND @SourceHashColumn = 0
- BEGIN
-  SET @Column_List_Insert_Values += ',' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
-	SET @Column_List_For_Update += ',' + @b COLLATE DATABASE_DEFAULT + '  [Target].' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT) +' = [Source].' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
-	SET @Column_List += ',' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
- END
- SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'WHEN MATCHED ' +
-	 CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL
-	 THEN 'AND ([Target].' + QUOTENAME(@hash_compare_column) +' <> [Source].' + QUOTENAME(@hash_compare_column) + ' OR [Target].' + QUOTENAME(@hash_compare_column) + ' IS NULL) '
-	 ELSE CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NULL THEN
-	 'AND (' + @Column_List_For_Check + ') ' ELSE '' END END + 'THEN'
- SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' UPDATE SET'
- SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + '  ' + LTRIM(@Column_List_For_Update COLLATE DATABASE_DEFAULT)
+  --Adding column @hash_compare_column to @ColumnList and @Column_List_For_Update if @hash_compare_column is not null
+  IF @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL AND @SourceHashColumn = 0
+  BEGIN
+    SET @Column_List_Insert_Values += ',' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
+    SET @Column_List_For_Update += ',' + @b COLLATE DATABASE_DEFAULT + '  [Target].' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT) +' = [Source].' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
+    SET @Column_List += ',' + QUOTENAME(@hash_compare_column COLLATE DATABASE_DEFAULT)
+  END
+  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + 'WHEN MATCHED ' +
+    CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NOT NULL THEN 
+      'AND ([Target].' + QUOTENAME(@hash_compare_column) +' <> [Source].' + QUOTENAME(@hash_compare_column) + ' OR [Target].' + QUOTENAME(@hash_compare_column) + ' IS NULL) '
+    ELSE 
+      CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NULL THEN 
+        'AND EXISTS (SELECT ' +  @Column_List_For_Check 
+        + @b COLLATE DATABASE_DEFAULT + '                 EXCEPT  SELECT ' + REPLACE(@Column_List_For_Check, '[Source]','[Target]') + ') '
+      ELSE '' END 
+    END + 'THEN' 
+  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' UPDATE SET'
+  SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + '  ' + LTRIM(@Column_List_For_Update COLLATE DATABASE_DEFAULT)
 END
 
 
