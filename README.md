@@ -232,10 +232,16 @@ EXEC sp_generate_merge
 ```
 
 #### Example 17: To generate & execute a MERGE that performs an ETL from a table in one database to another:
+_Note: When using the `@execute` param, `@batch_separator` must be `NULL`_
 ```
-DECLARE @sql NVARCHAR(MAX)
-EXEC [AdventureWorks]..sp_generate_merge @output = @sql output, @results_to_text = null, @schema = 'Person', @table_name = 'AddressType', @include_values = 0, @include_use_db = 0, @batch_separator = null, @target_table = '[AdventureWorks_Target].[Person].[AddressType]'
-EXEC [AdventureWorks]..sp_executesql @sql
+EXEC [AdventureWorks]..sp_generate_merge
+  @schema = 'Person',
+  @table_name = 'AddressType',
+  @target_table = '[AdventureWorks_Target].[Person].[AddressType]',
+  @execute = 1,
+  @batch_separator = NULL,
+  @include_values = 0,
+  @results_to_text = NULL
 ```
 
 #### Example 18: To generate multiple MERGE statements and then execute them in one batch:
@@ -260,7 +266,7 @@ EXEC tempdb..sp_generate_merge
 ```
 
 #### Example 20: To generate a MERGE split into batches based on a max rowcount per batch:
-_Note: When using the @max_rows_per_batch param, `@delete_if_not_matched` must be `0` and `@include_values` must be `1` (default)_
+_Note: When using the `@max_rows_per_batch` param, `@delete_if_not_matched` must be `0` and `@include_values` must be `1` (default)_
 ```
 EXEC [AdventureWorks]..sp_generate_merge
   @table_name = 'MyTable',
