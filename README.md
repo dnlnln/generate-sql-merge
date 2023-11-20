@@ -231,22 +231,40 @@ EXEC sp_generate_merge
   @cols_to_join_on = "'ID'"
 ```
 
-#### Example 17: To generate and immediately execute a MERGE statement that performs an ETL from a table in one database to another:
+#### Example 17: To generate & execute a MERGE that performs an ETL from a table in one database to another:
 ```
 DECLARE @sql NVARCHAR(MAX)
 EXEC [AdventureWorks]..sp_generate_merge @output = @sql output, @results_to_text = null, @schema = 'Person', @table_name = 'AddressType', @include_values = 0, @include_use_db = 0, @batch_separator = null, @target_table = '[AdventureWorks_Target].[Person].[AddressType]'
 EXEC [AdventureWorks]..sp_executesql @sql
 ```
 
-#### Example 18: To generate a MERGE that works with a subset of data from the source table only (e.g. will only INSERT/UPDATE rows that meet certain criteria, and not delete unmatched rows):
+#### Example 18: To generate multiple MERGE statements and then execute them in one batch:
 ```
-SELECT * INTO #CurrencyRateFiltered FROM AdventureWorks.Sales.CurrencyRate WHERE ToCurrencyCode = 'AUD';
-ALTER TABLE #CurrencyRateFiltered ADD CONSTRAINT PK_Sales_CurrencyRate PRIMARY KEY CLUSTERED ( CurrencyRateID )
-EXEC tempdb..sp_generate_merge @table_name='#CurrencyRateFiltered', @target_table='[AdventureWorks].[Sales].[CurrencyRate]', @delete_if_not_matched = 0, @include_use_db = 0;
+DECLARE @all_sql NVARCHAR(MAX) = '', @sql NVARCHAR(MAX);
+EXEC [AdventureWorks]..sp_generate_merge @output = @sql output, @batch_separator = null, @schema = 'Person', @table_name = 'AddressType';
+SET @all_sql += @sql;
+EXEC [AdventureWorks]..sp_generate_merge @output = @sql output, @batch_separator = null, @schema = 'Person', @table_name = 'PhoneNumberType';
+SET @all_sql += @sql;
+EXEC [AdventureWorks]..sp_executesql @all_sql;
 ```
 
-#### Example 19: To generate a MERGE split into batches based on a max rowcount per batch:
-Note: `@delete_if_not_matched` must be `0`, and `@include_values` must be `1`.
+#### Example 19: To generate a MERGE that works with a subset of data from the source table only (e.g. will only INSERT/UPDATE rows that meet certain criteria, and not delete unmatched rows):
 ```
-EXEC [AdventureWorks]..[sp_generate_merge] @table_name = 'MyTable', @schema = 'dbo', @delete_if_not_matched = 0, @max_rows_per_batch = 100
+SELECT * INTO #CurrencyRateFiltered FROM AdventureWorks.Sales.CurrencyRate WHERE ToCurrencyCode = 'AUD';
+ALTER TABLE #CurrencyRateFiltered ADD CONSTRAINT PK_Sales_CurrencyRate PRIMARY KEY CLUSTERED ( CurrencyRateID );
+EXEC tempdb..sp_generate_merge
+  @table_name = '#CurrencyRateFiltered',
+  @target_table = '[AdventureWorks].[Sales].[CurrencyRate]',
+  @delete_if_not_matched = 0,
+  @include_use_db = 0;
+```
+
+#### Example 20: To generate a MERGE split into batches based on a max rowcount per batch:
+_Note: When using the @max_rows_per_batch param, `@delete_if_not_matched` must be `0` and `@include_values` must be `1` (default)_
+```
+EXEC [AdventureWorks]..sp_generate_merge
+  @table_name = 'MyTable',
+  @schema = 'dbo',
+  @delete_if_not_matched = 0,
+  @max_rows_per_batch = 100
 ```

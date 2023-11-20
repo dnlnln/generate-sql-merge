@@ -193,20 +193,33 @@ Example 16: To generate a MERGE statement that will update the target table if t
     @nologo = 1,
     @cols_to_join_on = "'ID'"
 
-Example 17: To generate and immediately execute a MERGE statement that performs an ETL from a table in one database to another:
+Example 17: To generate & execute a MERGE that performs an ETL from a table in one database to another:
 
   DECLARE @sql NVARCHAR(MAX)
   EXEC [AdventureWorks]..sp_generate_merge @output = @sql output, @results_to_text = null, @schema = 'Person', @table_name = 'AddressType', @include_values = 0, @include_use_db = 0, @batch_separator = null, @target_table = '[AdventureWorks_Target].[Person].[AddressType]'
   EXEC [AdventureWorks]..sp_executesql @sql
 
-Example 18: To generate a MERGE that works with a subset of data from the source table only (e.g. will only INSERT/UPDATE rows that meet certain criteria, and not delete unmatched rows):
+Example 18: To generate multiple MERGE statements and then execute them in one batch:
+
+  DECLARE @all_sql NVARCHAR(MAX) = '', @sql NVARCHAR(MAX);
+  EXEC [AdventureWorks]..sp_generate_merge @output = @sql output, @batch_separator = null, @schema = 'Person', @table_name = 'AddressType';
+  SET @all_sql += @sql;
+  EXEC [AdventureWorks]..sp_generate_merge @output = @sql output, @batch_separator = null, @schema = 'Person', @table_name = 'PhoneNumberType';
+  SET @all_sql += @sql;
+  EXEC [AdventureWorks]..sp_executesql @all_sql;
+
+Example 19: To generate a MERGE that works with a subset of data from the source table only (e.g. will only INSERT/UPDATE rows that meet certain criteria, and not delete unmatched rows):
 
   SELECT * INTO #CurrencyRateFiltered FROM AdventureWorks.Sales.CurrencyRate WHERE ToCurrencyCode = 'AUD';
-  ALTER TABLE #CurrencyRateFiltered ADD CONSTRAINT PK_Sales_CurrencyRate PRIMARY KEY CLUSTERED ( CurrencyRateID )
-  EXEC tempdb..sp_generate_merge @table_name='#CurrencyRateFiltered', @target_table='[AdventureWorks].[Sales].[CurrencyRate]', @delete_if_not_matched = 0, @include_use_db = 0;
+  ALTER TABLE #CurrencyRateFiltered ADD CONSTRAINT PK_Sales_CurrencyRate PRIMARY KEY CLUSTERED ( CurrencyRateID );
+  EXEC tempdb..sp_generate_merge
+    @table_name = '#CurrencyRateFiltered',
+    @target_table = '[AdventureWorks].[Sales].[CurrencyRate]',
+    @delete_if_not_matched = 0,
+    @include_use_db = 0;
 
-Example 19: To generate a MERGE split into batches based on a max rowcount per batch:
-  Note: @delete_if_not_matched must be 0, and @include_values must be 1
+Example 20: To generate a MERGE split into batches based on a max rowcount per batch:
+  Note: When using the @max_rows_per_batch param, @delete_if_not_matched must be 0 and @include_values must be 1 (default)
 
   EXEC [AdventureWorks]..[sp_generate_merge] @table_name = 'MyTable', @schema = 'dbo', @delete_if_not_matched = 0, @max_rows_per_batch = 100
  
@@ -231,40 +244,40 @@ IF ((@cols_to_include IS NOT NULL) AND (@cols_to_exclude IS NOT NULL))
 --Making sure the @cols_to_include, @cols_to_exclude and @cols_to_join_on parameters are receiving values in proper format
 IF ((@cols_to_include IS NOT NULL) AND (PATINDEX('''%''',@cols_to_include COLLATE DATABASE_DEFAULT) = 0))
  BEGIN
- RAISERROR('Invalid use of @cols_to_include property',16,1)
+ RAISERROR('Invalid use of @cols_to_include parameter',16,1)
  PRINT 'Specify column names surrounded by single quotes and separated by commas'
  PRINT 'Eg: EXEC sp_generate_merge "titles", @cols_to_include = "''title_id'',''title''"'
- RETURN -1 --Failure. Reason: Invalid use of @cols_to_include property
+ RETURN -1 --Failure. Reason: Invalid use of @cols_to_include parameter
  END
 
 IF ((@cols_to_exclude IS NOT NULL) AND (PATINDEX('''%''',@cols_to_exclude COLLATE DATABASE_DEFAULT) = 0))
  BEGIN
- RAISERROR('Invalid use of @cols_to_exclude property',16,1)
+ RAISERROR('Invalid use of @cols_to_exclude parameter',16,1)
  PRINT 'Specify column names surrounded by single quotes and separated by commas'
  PRINT 'Eg: EXEC sp_generate_merge "titles", @cols_to_exclude = "''title_id'',''title''"'
- RETURN -1 --Failure. Reason: Invalid use of @cols_to_exclude property
+ RETURN -1 --Failure. Reason: Invalid use of @cols_to_exclude parameter
  END
 
 IF ((@cols_to_join_on IS NOT NULL) AND (PATINDEX('''%''',@cols_to_join_on COLLATE DATABASE_DEFAULT) = 0))
  BEGIN
- RAISERROR('Invalid use of @cols_to_join_on property',16,1)
+ RAISERROR('Invalid use of @cols_to_join_on parameter',16,1)
  PRINT 'Specify column names surrounded by single quotes and separated by commas'
  PRINT 'Eg: EXEC sp_generate_merge "StateProvince", @schema = "Person", @cols_to_join_on = "''StateProvinceCode''"'
- RETURN -1 --Failure. Reason: Invalid use of @cols_to_join_on property
+ RETURN -1 --Failure. Reason: Invalid use of @cols_to_join_on parameter
  END
 
  IF @hash_compare_column IS NOT NULL AND @update_only_if_changed = 0
  BEGIN
-	RAISERROR('Invalid use of @update_only_if_changed property',16,1)
+	RAISERROR('Invalid use of @update_only_if_changed parameter',16,1)
 	PRINT 'The @hash_compare_column param is set, however @update_only_if_changed is set to 0. To utilize hash-based change detection, please ensure @update_only_if_changed is set to 1.'
-	RETURN -1 --Failure. Reason: Invalid use of @update_only_if_changed property
+	RETURN -1 --Failure. Reason: Invalid use of @update_only_if_changed parameter
  END	
 
  IF @hash_compare_column IS NOT NULL AND @include_values = 1
  BEGIN
 	RAISERROR('Invalid use of @include_values',16,1)
 	PRINT 'Using @hash_compare_column together with @include_values is currenty unsupported. Our intention is to support this in the future, however for now @hash_compare_column can only be specified when @include_values=0'
-	RETURN -1 --Failure. Reason: Invalid use of @include_values property
+	RETURN -1 --Failure. Reason: Invalid use of @include_values parameter
  END
 
 --Checking to see if the database name is specified along wih the table name
@@ -278,21 +291,21 @@ IF (PARSENAME(@table_name,3)) IS NOT NULL
 
 IF @max_rows_per_batch IS NOT NULL AND @delete_if_not_matched = 1
 BEGIN
-	RAISERROR('Invalid use of @max_rows_per_batch property in combination with @delete_if_not_matched',16,1)
+	RAISERROR('Invalid use of @max_rows_per_batch parameter in combination with @delete_if_not_matched',16,1)
 	PRINT 'The @max_rows_per_batch param is set, however @delete_if_not_matched is set to 1. To utilize batch-based merge, please ensure @delete_if_not_matched is set to 0.'
 	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch and @delete_if_not_matched properties
 END
 
 IF @max_rows_per_batch IS NOT NULL AND @include_values = 0
 BEGIN
-	RAISERROR('Invalid use of @max_rows_per_batch property in combination with @include_values',16,1)
+	RAISERROR('Invalid use of @max_rows_per_batch parameter in combination with @include_values',16,1)
 	PRINT 'The @max_rows_per_batch param is set, however @include_values is set to 0. To utilize batch-based merge, please ensure @include_values is set to 1.'
 	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch and @include_values properties
 END
 
 IF @max_rows_per_batch <= 0
 BEGIN
-	RAISERROR('Invalid use of @max_rows_per_batch',16,1)
+	RAISERROR('Invalid use of @max_rows_per_batch parameter',16,1)
 	PRINT 'The @max_rows_per_batch param must be set to 1 or higher.'
 	RETURN -1 --Failure. Reason: Invalid use of @max_rows_per_batch
 END
