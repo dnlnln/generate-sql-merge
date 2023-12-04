@@ -548,7 +548,7 @@ BEGIN
                                                                                                                                 END) + '')'''
     ELSE                                                                                                                       'LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))' 
   END
-  IF @results_to_text = 0 AND @Data_Type IN ('xml','char','nchar','varchar','nvarchar','text','ntext','sql_variant') -- Workaround for SSMS quirk where any occurrences of "?>" are replaced with "? >" in the output grid
+  IF @results_to_text = 0 AND @Data_Type COLLATE DATABASE_DEFAULT IN ('xml','char','nchar','varchar','nvarchar','text','ntext','sql_variant') -- Workaround for SSMS quirk where any occurrences of "?>" are replaced with "? >" in the output grid
   BEGIN
     SET @Column_Value_Selector = 'REPLACE(' + @Column_Value_Selector + ',''?>'',''?''''+''''>'')';
   END
@@ -905,7 +905,7 @@ BEGIN
     ELSE 
       CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NULL THEN 
         'AND EXISTS (SELECT ' +  @Column_List_For_Check 
-        + @b COLLATE DATABASE_DEFAULT + '                 EXCEPT  SELECT ' + REPLACE(@Column_List_For_Check, '[Source]','[Target]') + ') '
+        + @b COLLATE DATABASE_DEFAULT + '                 EXCEPT  SELECT ' + REPLACE(@Column_List_For_Check COLLATE DATABASE_DEFAULT, '[Source]','[Target]') + ') '
       ELSE '' END 
     END + 'THEN' 
   SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' UPDATE SET'
