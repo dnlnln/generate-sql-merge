@@ -383,7 +383,7 @@ DECLARE @Column_ID int,
  @sql nvarchar(max),  --SQL statement that will be executed to check existence of [Hashvalue] column in case @hash_compare_column is used
  @checkhashcolumn nvarchar(128),
  @SourceHashColumn bit = 0,
- @b char(1) = char(13)
+ @b char(1) = char(10)
 
 IF @hash_compare_column IS NOT NULL  --Check existence of column [Hashvalue] in target table and raise error in case of missing
 BEGIN
