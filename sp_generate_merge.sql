@@ -519,8 +519,8 @@ BEGIN
   DECLARE @Column_Value_Selector NVARCHAR(MAX) = CASE 
     WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('char')                                                                  THEN ''''''''' +  REPLACE(RTRIM(' + @Column_Name + '),'''''''','''''''''''')+'''''''''
     WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('nchar')                                                                 THEN '''N'''''' + REPLACE(RTRIM(' + @Column_Name + '),'''''''','''''''''''')+'''''''''
-    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('varchar')                                                               THEN '''''''''  + REPLACE(' + @Column_Name + ','''''''','''''''''''')+'''''''''
-    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('nvarchar')                                                              THEN '''N'''''' + REPLACE(' + @Column_Name + ','''''''','''''''''''')+'''''''''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('varchar')                                                               THEN '''''''''  + REPLACE(CAST(' + @Column_Name + 'AS VARCHAR(MAX)),'''''''','''''''''''')+'''''''''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('nvarchar')                                                              THEN '''N'''''' + REPLACE(CAST(' + @Column_Name + 'AS NVARCHAR(MAX)),'''''''','''''''''''')+'''''''''
     WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('datetime','smalldatetime','datetime2','date','datetimeoffset','time')   THEN '''''''''  + RTRIM(CONVERT(char,' + @Column_Name + ',127))+'''''''''
     WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('uniqueidentifier')                                                      THEN '''''''''  + REPLACE(CONVERT(char(36),RTRIM(' + @Column_Name + ')),'''''''','''''''''''')+'''''''''
     WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('text')                                                                  THEN '''''''''  + REPLACE(CONVERT(varchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''''
@@ -548,9 +548,18 @@ BEGIN
                                                                                                                                 END) + '')'''
     ELSE                                                                                                                       'LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))' 
   END
-  IF @results_to_text = 0 AND @Data_Type COLLATE DATABASE_DEFAULT IN ('xml','char','nchar','varchar','nvarchar','text','ntext','sql_variant') -- Workaround for SSMS quirk where any occurrences of "?>" are replaced with "? >" in the output grid
+  IF @Data_Type COLLATE DATABASE_DEFAULT IN ('xml','char','nchar','varchar','nvarchar','text','ntext','sql_variant')
   BEGIN
-    SET @Column_Value_Selector = 'REPLACE(' + @Column_Value_Selector + ',''?>'',''?''''+''''>'')';
+    IF @Data_Type COLLATE DATABASE_DEFAULT != 'xml'
+    BEGIN
+      -- Ensure that Windows-style linebreaks in string column data are preserved on SQL Server for Linux
+      SET @Column_Value_Selector = 'REPLACE(' + @Column_Value_Selector + ',CHAR(13)+CHAR(10),''''''+CHAR(13)+CHAR(10)+'''''')';
+    END
+    IF @results_to_text = 0
+    BEGIN
+        -- Workaround for SSMS quirk where any occurrences of "?>" are replaced with "? >" in the output grid
+        SET @Column_Value_Selector = 'REPLACE(' + @Column_Value_Selector + ',''?>'',''?''''+''''>'')';
+    END
   END
   SET @Actual_Values += @b COLLATE DATABASE_DEFAULT + 'COALESCE(' + @Column_Value_Selector + ',''NULL'')' + @Generate_Select_Delimiter COLLATE DATABASE_DEFAULT
   
