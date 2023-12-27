@@ -1054,13 +1054,13 @@ GO
 
 IF 'sp_generate_merge' NOT LIKE '#%'
 BEGIN
-  IF OBJECT_ID('sp_MS_marksystemobject', 'P') IS NOT NULL AND DB_NAME() = 'master'
+  IF OBJECT_ID('sys.sp_MS_marksystemobject', 'P') IS NOT NULL AND DB_NAME() = 'master'
   BEGIN
     PRINT 'Adding system object flag to allow procedure to be used within all databases'
-    EXEC sp_MS_marksystemobject 'sp_generate_merge'
+    EXEC [sys].[sp_MS_marksystemobject] @objname='sp_generate_merge', @namespace=NULL
   END
   PRINT 'Granting EXECUTE permission on stored procedure to all users'
-  GRANT EXEC ON [sp_generate_merge] TO [public]
+  GRANT EXECUTE ON [sp_generate_merge] TO [public]
 END
 PRINT 'Done'
 SET NOCOUNT OFF
