@@ -905,7 +905,7 @@ BEGIN
     ELSE 
       CASE WHEN @update_only_if_changed = 1 AND @hash_compare_column IS NULL THEN 
         'AND EXISTS (SELECT ' +  @Column_List_For_Check 
-        + @b COLLATE DATABASE_DEFAULT + '                 EXCEPT  SELECT ' + REPLACE(@Column_List_For_Check COLLATE DATABASE_DEFAULT, '[Source]','[Target]') + ') '
+        + @b COLLATE DATABASE_DEFAULT + '                 EXCEPT  SELECT ' + REPLACE(@Column_List_For_Check COLLATE DATABASE_DEFAULT, '[Source].','[Target].') + ') '
       ELSE '' END 
     END + 'THEN' 
   SET @outputMergeBatch += @b COLLATE DATABASE_DEFAULT + ' UPDATE SET'
