@@ -174,13 +174,13 @@ EXEC sp_generate_merge 'AddressType', @schema = 'Contact'
 
 #### Example 7: To generate a MERGE statement for the rest of the columns excluding those of the `image` data type:
 ```
-EXEC sp_generate_merge 'imgtable', @ommit_images = 1
+EXEC sp_generate_merge 'imgtable', @exclude_image_columns = 1
 ```
 
 #### Example 8: To generate a MERGE statement excluding (omitting) IDENTITY columns:
  (By default IDENTITY columns are included in the MERGE statement)
 ```
-EXEC sp_generate_merge 'mytable', @ommit_identity = 1
+EXEC sp_generate_merge 'mytable', @exclude_identity_columns = 1
 ```
 
 #### Example 9: To generate a MERGE statement for the TOP 10 rows in the table:
@@ -205,7 +205,7 @@ EXEC sp_generate_merge 'titles', @disable_constraints = 1
 
 #### Example 13: To exclude computed columns from the MERGE statement:
 ```
-EXEC sp_generate_merge 'MyTable', @ommit_computed_cols = 1
+EXEC sp_generate_merge 'MyTable', @exclude_computed_columns = 1
 ```
 
 #### Example 14: To generate a MERGE statement for a table that lacks a primary key:
