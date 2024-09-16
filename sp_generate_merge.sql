@@ -44,10 +44,12 @@ CREATE PROC [sp_generate_merge]
  @from nvarchar(max) = NULL, -- Use this parameter to filter the rows based on a filter condition (using WHERE). Note: To avoid inconsistent ordering of results, including an ORDER BY clause is highly recommended
  @include_values bit = 1, -- When 1, a VALUES clause containing data from @table_name is generated. When 0, data will be sourced directly from @table_name when the MERGE is executed (see example 15 for use case)
  @include_timestamp bit = 0, -- [OBSOLETE] Sql Server does not allow modification of TIMESTAMP data type
- @debug_mode bit = 0, -- If @debug_mode is set to 1, the SQL statements constructed by this procedure will be printed for later examination
- @schema nvarchar(64) = NULL, -- Use this parameter if you are not the owner of the table
- @ommit_images bit = 0, -- Excludes any columns of the IMAGE data type
- @ommit_identity bit = 0, -- Use this parameter to omit IDENTITY columns
+ @debug_mode bit = 0, -- When 1, the SQL statements constructed by this procedure will be included in the output
+ @schema nvarchar(64) = NULL, -- The schema that @table_name belongs to (needed if the table is not in the default schema)
+ @exclude_image_columns bit = 0, -- When 1, any columns of the image data type will be excluded
+ @exclude_identity_columns bit = 0, -- When 1, any columns that have an auto-incrementing identity will be excluded
+ @ommit_images bit = NULL, -- [DEPRECATED] Use @exclude_image_columns instead
+ @ommit_identity bit = NULL, -- [DEPRECATED] Use @exclude_identity_columns instead
  @top int = NULL, -- Use this parameter to generate a MERGE statement only for the TOP n rows
  @cols_to_include nvarchar(max) = NULL, -- List of columns to be included in the MERGE statement
  @cols_to_exclude nvarchar(max) = NULL, -- List of columns to be excluded from the MERGE statement
@@ -56,8 +58,10 @@ CREATE PROC [sp_generate_merge]
  @hash_compare_column nvarchar(128) = NULL, -- When specified, change detection will be based on a SHA2_256 hash of the source data (the hash value will be stored in this @target_table column for later comparison; see Example 16)
  @delete_if_not_matched bit = 1, -- When 1, performs a DELETE when the target includes extra rows. When 0, the MERGE statement will only include the INSERT and, if @update_existing=1, UPDATE operations.
  @disable_constraints bit = 0, -- When 1, disables foreign key constraints and enables them after the MERGE statement
- @ommit_computed_cols bit = 1, -- When 1, computed columns will not be included in the MERGE statement
- @ommit_generated_always_cols bit = 1, -- When 1, GENERATED ALWAYS columns will not be included in the MERGE statement
+ @exclude_computed_columns bit = 1, -- When 1, computed columns will be included in the MERGE statement
+ @exclude_generated_always_columns bit = 1, -- When 1, GENERATED ALWAYS columns will be excluded
+ @ommit_computed_cols bit = NULL, -- [DEPRECATED] Use @exclude_computed_columns instead
+ @ommit_generated_always_cols bit = NULL, -- [DEPRECATED] Use @exclude_generated_always_columns instead
  @include_use_db bit = 1, -- When 1, includes a USE [DatabaseName] statement at the beginning of the generated batch
  @results_to_text bit = 0, -- When 1, outputs results to grid/messages window. When 0, outputs MERGE statement in an XML fragment. When NULL, only the @output OUTPUT parameter is returned.
  @include_rowsaffected bit = 1, -- When 1, a section is added to the end of the batch which outputs rows affected by the MERGE
@@ -148,12 +152,12 @@ Example 6: If the table is in a different schema to the default eg. `Contact.Add
 
 Example 7: To generate a MERGE statement excluding IMAGE data type columns:
 
-  EXEC sp_generate_merge 'imgtable', @ommit_images = 1
+  EXEC sp_generate_merge 'imgtable', @exclude_image_columns = 1
 
 Example 8: To generate a MERGE statement excluding IDENTITY columns:
  (By default IDENTITY columns are included in the MERGE statement)
 
-  EXEC sp_generate_merge 'mytable', @ommit_identity = 1
+  EXEC sp_generate_merge 'mytable', @exclude_identity_columns = 1
 
 Example 9: To generate a MERGE statement for the TOP 10 rows in the table:
  
@@ -173,7 +177,7 @@ Example 12: To avoid checking the foreign key constraints while loading data wit
 
 Example 13: To exclude computed columns from the MERGE statement:
 
-  EXEC sp_generate_merge 'MyTable', @ommit_computed_cols = 1
+  EXEC sp_generate_merge 'MyTable', @exclude_computed_columns = 1
 
 Example 14: To generate a MERGE statement for a table that lacks a primary key:
  
@@ -363,6 +367,47 @@ BEGIN
   END
 END
 
+-- Handle deprecated parameters: @ommit_images, @ommit_identity, @ommit_computed_cols and @ommit_generated_always_cols
+IF @ommit_images IS NOT NULL
+BEGIN
+  IF @quiet = 0 PRINT 'Warning: @ommit_images is deprecated and will soon be removed. Use @exclude_image_columns instead.'
+  IF @exclude_image_columns = 1
+  BEGIN
+    RAISERROR('@exclude_image_columns and @ommit_images cannot be specified together. To resolve, remove the deprecated @ommit_images parameter.', 16, 1)
+    RETURN -1
+  END
+  SET @exclude_image_columns = @ommit_images
+END
+IF @ommit_identity IS NOT NULL
+BEGIN
+  IF @quiet = 0 PRINT 'Warning: @ommit_identity is deprecated and will soon be removed. Use @exclude_identity_columns instead.'
+  IF @exclude_identity_columns = 1
+  BEGIN
+    RAISERROR('@exclude_identity_columns and @ommit_identity cannot be specified together. To resolve, remove the deprecated @ommit_identity parameter.', 16, 1)
+    RETURN -1
+  END
+  SET @exclude_identity_columns = @ommit_identity
+END
+IF @ommit_computed_cols IS NOT NULL
+BEGIN
+  IF @quiet = 0 PRINT 'Warning: @ommit_computed_cols is deprecated and will soon be removed. Use @exclude_computed_columns instead.'
+  IF @exclude_computed_columns = 0
+  BEGIN
+    RAISERROR('@exclude_computed_columns and @ommit_computed_cols cannot be specified together. To resolve, remove the deprecated @ommit_computed_cols parameter.', 16, 1)
+    RETURN -1
+  END
+  SET @exclude_computed_columns = @ommit_computed_cols
+END
+IF @ommit_generated_always_cols IS NOT NULL
+BEGIN
+  IF @quiet = 0 PRINT 'Warning: @ommit_generated_always_cols is deprecated and will soon be removed. Use @exclude_generated_always_columns instead.'
+  IF @exclude_generated_always_columns = 0
+  BEGIN
+    RAISERROR('@exclude_generated_always_columns and @ommit_generated_always_cols cannot be specified together. To resolve, remove the deprecated @ommit_generated_always_cols parameter.', 16, 1)
+    RETURN -1
+  END
+  SET @exclude_generated_always_columns = @ommit_generated_always_cols
+END
 
 --Variable declarations
 DECLARE @Column_ID int, 
@@ -481,7 +526,7 @@ BEGIN
     GOTO SKIP_LOOP
 
   --Include identity columns, unless the user has decided not to
-  IF @ommit_identity = 1 AND COLUMNPROPERTY( @Source_Table_Object_Id,@Column_Name_Unquoted,'IsIdentity') = 1
+  IF @exclude_identity_columns = 1 AND COLUMNPROPERTY( @Source_Table_Object_Id,@Column_Name_Unquoted,'IsIdentity') = 1
     GOTO SKIP_LOOP
 
   --Identity column? Capture the name
@@ -489,18 +534,18 @@ BEGIN
     SET @IDN = @Column_Name COLLATE DATABASE_DEFAULT
 
   --Computed columns can't be inserted/updated, so exclude them unless directed otherwise
-  IF @ommit_computed_cols = 1 AND COLUMNPROPERTY( @Source_Table_Object_Id,@Column_Name_Unquoted,'IsComputed') = 1
+  IF @exclude_computed_columns = 1 AND COLUMNPROPERTY( @Source_Table_Object_Id,@Column_Name_Unquoted,'IsComputed') = 1
   BEGIN
     IF @quiet = 0
-      PRINT 'Warning: The ' + @Column_Name + ' computed column will be excluded from the MERGE statement. Specify @ommit_computed_cols = 0 to include computed columns.'
+      PRINT 'Warning: The ' + @Column_Name + ' computed column will be excluded from the MERGE statement. Specify @exclude_computed_columns = 0 to include computed columns.'
     GOTO SKIP_LOOP 
   END
 
   --GENERATED ALWAYS type columns can't be inserted/updated, so exclude them unless directed otherwise
-  IF @ommit_generated_always_cols = 1 AND ISNULL(COLUMNPROPERTY( @Source_Table_Object_Id,@Column_Name_Unquoted,'GeneratedAlwaysType'), 0) <> 0
+  IF @exclude_generated_always_columns = 1 AND ISNULL(COLUMNPROPERTY( @Source_Table_Object_Id,@Column_Name_Unquoted,'GeneratedAlwaysType'), 0) <> 0
   BEGIN
     IF @quiet = 0
-      PRINT 'Warning: The ' + @Column_Name + ' GENERATED ALWAYS column will be excluded from the MERGE statement. Specify @ommit_generated_always_cols = 0 to include GENERATED ALWAYS columns.'
+      PRINT 'Warning: The ' + @Column_Name + ' GENERATED ALWAYS column will be excluded from the MERGE statement. Specify @exclude_generated_always_columns = 0 to include GENERATED ALWAYS columns.'
     GOTO SKIP_LOOP 
   END
 
@@ -509,10 +554,10 @@ BEGIN
     SET @SourceHashColumn = 1
  
   --Historically, image columns were not supported by this proc, so exclude them if the user still doesn't want them
-  IF @ommit_images = 1 AND @Data_Type COLLATE DATABASE_DEFAULT = 'image'
+  IF @exclude_image_columns = 1 AND @Data_Type COLLATE DATABASE_DEFAULT = 'image'
   BEGIN
     IF @quiet = 0
-      PRINT 'Warning: The ' + @Column_Name + ' image column will be excluded from the MERGE statement. Specify @ommit_images = 0 to include image columns.'
+      PRINT 'Warning: The ' + @Column_Name + ' image column will be excluded from the MERGE statement. Specify @exclude_image_columns = 0 to include image columns.'
     GOTO SKIP_LOOP 
   END
 
@@ -628,7 +673,7 @@ SET @Column_List = LEFT(@Column_List,LEN(@Column_List) - 1)
 IF LEN(LTRIM(@Column_List)) = 0
  BEGIN
  RAISERROR('No columns to select. There should at least be one column to generate the output',16,1)
- RETURN -1 --Failure. Reason: Looks like all the columns are ommitted using the @cols_to_exclude parameter
+ RETURN -1 --Failure. Reason: Looks like all the columns have been excluded via the @cols_to_exclude parameter
  END
 
 SET @Column_List_Insert_Values = LEFT(@Column_List_Insert_Values,LEN(@Column_List_Insert_Values) - 1)
