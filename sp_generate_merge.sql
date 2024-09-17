@@ -71,7 +71,8 @@ CREATE PROC [sp_generate_merge]
  @update_existing bit = 1, -- When 1, performs an UPDATE operation on existing rows. When 0, the MERGE statement will only include the INSERT and, if @delete_if_not_matched=1, DELETE operations.
  @max_rows_per_batch int = NULL, -- When not NULL, splits the MERGE command into multiple batches, each batch merges X rows as specified
  @quiet bit = 0, -- When 1, this proc will not print informational messages and warnings
- @execute bit = 0 -- When 1, the generated MERGE will be executed by this proc. Note: The @batch_separator param must be set to NULL when @execute=1
+ @execute bit = 0, -- When 1, the generated MERGE will be executed by this proc. Note: The @batch_separator param must be set to NULL when @execute=1
+ @serializable bit = 1 -- When 1, the generated MERGE will include the WITH (SERIALIZABLE) table hint
 )
 AS
 BEGIN
@@ -878,8 +879,16 @@ END
 
 DECLARE @outputMergeBatch nvarchar(max), @ValuesListTotalCount int;
 
---Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it
-SET @outputMergeBatch = @b COLLATE DATABASE_DEFAULT + 'MERGE INTO ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' WITH (SERIALIZABLE) AS [Target]'
+--Output the start of the MERGE statement, qualifying with the schema name only if the caller explicitly specified it and optionally
+--including the WITH (SERIALIZABLE) table hint (see https://learn.microsoft.com/en-us/sql/t-sql/queries/hints-transact-sql-table#serializable)
+IF @serializable = 1
+BEGIN
+  SET @outputMergeBatch = @b COLLATE DATABASE_DEFAULT + 'MERGE INTO ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' WITH (SERIALIZABLE) AS [Target]'
+END
+ELSE
+BEGIN
+  SET @outputMergeBatch = @b COLLATE DATABASE_DEFAULT + 'MERGE INTO ' + @Target_Table_For_Output COLLATE DATABASE_DEFAULT + ' AS [Target]'
+END
 DECLARE @tab TABLE (ID INT NOT NULL PRIMARY KEY IDENTITY(1,1), val NVARCHAR(max));
 
 IF @include_values = 1
