@@ -438,7 +438,7 @@ BEGIN
     'SELECT @columnname = column_name
     FROM ' + COALESCE(PARSENAME(@target_table COLLATE DATABASE_DEFAULT,3),QUOTENAME(DB_NAME())) + '.INFORMATION_SCHEMA.COLUMNS (NOLOCK)
     WHERE TABLE_NAME = ''' + PARSENAME(@target_table COLLATE DATABASE_DEFAULT,1) + '''' +
-    ' AND TABLE_SCHEMA = ' + '''' + COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME()) + '''' + ' AND [COLUMN_NAME] = ''' + @hash_compare_column COLLATE DATABASE_DEFAULT + ''''
+    ' AND TABLE_SCHEMA = ' + '''' + COALESCE(PARSENAME(@target_table COLLATE DATABASE_DEFAULT,2), @schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME()) + '''' + ' AND [COLUMN_NAME] = ''' + @hash_compare_column COLLATE DATABASE_DEFAULT + ''''
   EXECUTE sp_executesql @sql, N'@columnname nvarchar(128) OUTPUT', @columnname = @checkhashcolumn OUTPUT
   IF @checkhashcolumn IS NULL
   BEGIN
