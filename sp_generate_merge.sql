@@ -596,7 +596,7 @@ BEGIN
   END
   IF @results_to_text = 0 AND @Data_Type COLLATE DATABASE_DEFAULT IN ('xml','char','nchar','varchar','nvarchar','text','ntext','sql_variant') -- Workaround for SSMS quirk where any occurrences of "?>" are replaced with "? >" in the output grid
   BEGIN
-    SET @Column_Value_Selector = 'REPLACE(' + @Column_Value_Selector + ',''?>'',''?''''+''''>'')';
+    SET @Column_Value_Selector = 'REPLACE(' + @Column_Value_Selector + ',''?''+''>'',''?''''+''''>'')';
   END
   SET @Actual_Values += @b COLLATE DATABASE_DEFAULT + 'COALESCE(' + @Column_Value_Selector + ',''NULL'')' + @Generate_Select_Delimiter COLLATE DATABASE_DEFAULT
   
