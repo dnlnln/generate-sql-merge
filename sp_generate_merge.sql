@@ -51,9 +51,9 @@ CREATE PROC [sp_generate_merge]
  @ommit_images bit = NULL, -- [DEPRECATED] Use @exclude_image_columns instead
  @ommit_identity bit = NULL, -- [DEPRECATED] Use @exclude_identity_columns instead
  @top int = NULL, -- Use this parameter to generate a MERGE statement only for the TOP n rows
- @cols_to_include nvarchar(max) = NULL, -- List of columns to be included in the MERGE statement
- @cols_to_exclude nvarchar(max) = NULL, -- List of columns to be excluded from the MERGE statement
- @cols_to_join_on nvarchar(max) = NULL, -- List of columns needed to JOIN the source table to the target table (useful when @table_name is missing a primary key) 
+ @cols_to_include nvarchar(max) = NULL, -- List of columns to be included in the MERGE statement. Note that table aliases are NOT supported.
+ @cols_to_exclude nvarchar(max) = NULL, -- List of columns to be excluded from the MERGE statement. Note that table aliases are NOT supported.
+ @cols_to_join_on nvarchar(max) = NULL, -- List of columns needed to JOIN the source table to the target table (useful when @table_name is missing a primary key). Note that table aliases are NOT supported.
  @update_only_if_changed bit = 1, -- When 1, only performs an UPDATE operation if an included column in a matched row has changed.
  @hash_compare_column nvarchar(128) = NULL, -- When specified, change detection will be based on a SHA2_256 hash of the source data (the hash value will be stored in this @target_table column for later comparison; see Example 16)
  @delete_if_not_matched bit = 1, -- When 1, performs a DELETE when the target includes extra rows. When 0, the MERGE statement will only include the INSERT and, if @update_existing=1, UPDATE operations.
