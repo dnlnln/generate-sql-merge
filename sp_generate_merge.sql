@@ -349,7 +349,7 @@ END
 --To script the data in system tables, just create a view on the system tables and script the view instead
 IF @schema IS NULL
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT AND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW') AND TABLE_SCHEMA = SCHEMA_NAME())
+  IF NOT EXISTS (SELECT 1 FROM sys.tables t WHERE t.name = @Internal_Table_Name COLLATE DATABASE_DEFAULT AND t.schema_id = SCHEMA_ID())
   BEGIN
     RAISERROR('User table or view not found.',16,1)
     PRINT 'You may see this error if the specified table is not in your default schema (' + SCHEMA_NAME() + '). In that case use @schema parameter to specify the schema name.'
@@ -359,7 +359,7 @@ BEGIN
 END
 ELSE
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT AND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'VIEW') AND TABLE_SCHEMA = @schema COLLATE DATABASE_DEFAULT)
+  IF NOT EXISTS (SELECT 1 FROM sys.tables t WHERE t.name = @Internal_Table_Name COLLATE DATABASE_DEFAULT AND t.schema_id = SCHEMA_ID(@schema COLLATE DATABASE_DEFAULT))
   BEGIN
     RAISERROR('User table or view not found.',16,1)
     PRINT 'Make sure you have SELECT permission on that table or view.'
@@ -435,10 +435,13 @@ IF @hash_compare_column IS NOT NULL  --Check existence of column [Hashvalue] in 
 BEGIN
   IF @target_table IS NULL SET @target_table = @table_name COLLATE DATABASE_DEFAULT
   SET @sql =
-    'SELECT @columnname = column_name
-    FROM ' + COALESCE(PARSENAME(@target_table COLLATE DATABASE_DEFAULT,3),QUOTENAME(DB_NAME())) + '.INFORMATION_SCHEMA.COLUMNS (NOLOCK)
-    WHERE TABLE_NAME = ''' + PARSENAME(@target_table COLLATE DATABASE_DEFAULT,1) + '''' +
-    ' AND TABLE_SCHEMA = ' + '''' + COALESCE(PARSENAME(@target_table COLLATE DATABASE_DEFAULT,2), @schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME()) + '''' + ' AND [COLUMN_NAME] = ''' + @hash_compare_column COLLATE DATABASE_DEFAULT + ''''
+    'SELECT @columnname = c.name
+    FROM ' + COALESCE(PARSENAME(@target_table COLLATE DATABASE_DEFAULT,3),QUOTENAME(DB_NAME())) + '.sys.columns c
+    INNER JOIN ' + COALESCE(PARSENAME(@target_table COLLATE DATABASE_DEFAULT,3),QUOTENAME(DB_NAME())) + '.sys.tables t ON c.object_id = t.object_id
+    INNER JOIN ' + COALESCE(PARSENAME(@target_table COLLATE DATABASE_DEFAULT,3),QUOTENAME(DB_NAME())) + '.sys.schemas s ON s.schema_id = t.schema_id
+    WHERE t.[name] = ''' + PARSENAME(@target_table COLLATE DATABASE_DEFAULT,1) + '''' + '
+    AND s.[name] = ''' + COALESCE(PARSENAME(@target_table COLLATE DATABASE_DEFAULT,2), @schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME()) + '''' + '
+	  AND c.[name] = ''' + @hash_compare_column COLLATE DATABASE_DEFAULT + ''''
   EXECUTE sp_executesql @sql, N'@columnname nvarchar(128) OUTPUT', @columnname = @checkhashcolumn OUTPUT
   IF @checkhashcolumn IS NULL
   BEGIN
@@ -496,22 +499,25 @@ SET @Source_Table_For_Output = QUOTENAME(COALESCE(@schema COLLATE DATABASE_DEFAU
 SELECT @Source_Table_Object_Id = OBJECT_ID(@Source_Table_Qualified)
 
 --To get the first column's ID
-SELECT @Column_ID = MIN(ORDINAL_POSITION) 
-FROM INFORMATION_SCHEMA.COLUMNS (NOLOCK) 
-WHERE TABLE_NAME = @Internal_Table_Name
-AND TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
-
+SELECT @Column_ID = MIN(c.column_id) 
+FROM sys.columns c 
+INNER JOIN sys.tables t ON c.object_id = t.object_id
+WHERE t.name = @Internal_Table_Name COLLATE DATABASE_DEFAULT
+AND t.schema_id = COALESCE(SCHEMA_ID(@schema COLLATE DATABASE_DEFAULT), SCHEMA_ID())
 
 --Loop through all the columns of the table, decide whether to include/exclude each one, and put together the value serialisation SQL
 WHILE @Column_ID IS NOT NULL
 BEGIN
-  SELECT @Column_Name = QUOTENAME(COLUMN_NAME), 
-         @Column_Name_Unquoted = COLUMN_NAME,
-         @Data_Type = DATA_TYPE 
-  FROM INFORMATION_SCHEMA.COLUMNS (NOLOCK) 
-  WHERE ORDINAL_POSITION = @Column_ID
-  AND TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
-  AND TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
+  SELECT @Column_Name = QUOTENAME(c.name), 
+         @Column_Name_Unquoted = c.name,
+         @Data_Type = bt.name
+  FROM sys.columns c
+  INNER JOIN sys.tables t ON c.object_id = t.object_id
+  INNER JOIN sys.types tp ON c.user_type_id = tp.user_type_id
+  INNER JOIN sys.types bt ON tp.system_type_id = bt.user_type_id AND tp.system_type_id = bt.system_type_id
+  WHERE c.column_id = @Column_ID
+    AND t.name = @Internal_Table_Name COLLATE DATABASE_DEFAULT
+    AND t.schema_id = COALESCE(SCHEMA_ID(@schema COLLATE DATABASE_DEFAULT), SCHEMA_ID())
 
   --Timestamp/Rowversion columns can't be inserted/updated due to SQL Server limitations, so exclude them
   IF @Data_Type COLLATE DATABASE_DEFAULT IN ('timestamp','rowversion')
@@ -614,21 +620,17 @@ BEGIN
   IF NOT EXISTS
   (
     SELECT 1
-    FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk,
-         INFORMATION_SCHEMA.KEY_COLUMN_USAGE c
-    WHERE pk.TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
-    AND pk.TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
-    AND CONSTRAINT_TYPE = 'PRIMARY KEY'
-    AND c.TABLE_NAME = pk.TABLE_NAME
-    AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
-    AND c.CONSTRAINT_NAME = pk.CONSTRAINT_NAME
-    AND c.COLUMN_NAME = @Column_Name_Unquoted COLLATE DATABASE_DEFAULT
-  UNION
+    FROM sys.key_constraints pk
+    INNER JOIN sys.index_columns ic ON pk.parent_object_id = ic.object_id AND pk.unique_index_id = ic.index_id
+    INNER JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+    WHERE pk.type = 'PK'
+  	  AND pk.parent_object_id = OBJECT_ID(QUOTENAME(COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())) + '.' + QUOTENAME(@Internal_Table_Name))
+      AND c.name = @Column_Name_Unquoted COLLATE DATABASE_DEFAULT
+    UNION
     SELECT 1
     FROM sys.identity_columns
-    WHERE OBJECT_SCHEMA_NAME(object_id) = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
-    AND OBJECT_NAME(object_id) = @Internal_Table_Name COLLATE DATABASE_DEFAULT
-    AND name = @Column_Name_Unquoted COLLATE DATABASE_DEFAULT
+    WHERE object_id = OBJECT_ID(QUOTENAME(COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())) + '.' + QUOTENAME(@Internal_Table_Name))
+      AND name = @Column_Name_Unquoted COLLATE DATABASE_DEFAULT
   )
   BEGIN
     DECLARE @Source_Column_Spec NVARCHAR(128) = CASE @Data_Type COLLATE DATABASE_DEFAULT WHEN 'xml' THEN N'CONVERT(xml, [Source].' + @Column_Name + ')' ELSE '[Source].' + @Column_Name END
@@ -647,11 +649,12 @@ BEGIN
 
   SKIP_LOOP: --The label used in GOTO
 
-  SET @Column_ID = (SELECT MIN(ORDINAL_POSITION) 
-                    FROM INFORMATION_SCHEMA.COLUMNS (NOLOCK) 
-                    WHERE TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
-                    AND TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
-                    AND ORDINAL_POSITION > @Column_ID)
+  SET @Column_ID = (SELECT MIN(c.column_id)
+                    FROM sys.columns c
+                    INNER JOIN sys.tables t ON c.object_id = t.object_id
+                    WHERE t.name = @Internal_Table_Name COLLATE DATABASE_DEFAULT
+                      AND t.schema_id = COALESCE(SCHEMA_ID(@schema COLLATE DATABASE_DEFAULT), SCHEMA_ID())
+                      AND c.column_id > @Column_ID)
 
 END --WHILE LOOP END
 
@@ -691,26 +694,25 @@ SET @PK_column_joins = ''
 
 IF ISNULL(@cols_to_join_on COLLATE DATABASE_DEFAULT, '') = '' -- Use primary key of the source table as the basis of MERGE joins, if no join list is specified
 BEGIN
-	SELECT @PK_column_list = @PK_column_list + '[' + c.COLUMN_NAME + '], '
-	, @PK_column_joins = @PK_column_joins + '[Target].[' + c.COLUMN_NAME + '] = [Source].[' + c.COLUMN_NAME + '] AND '
-	FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk ,
-	INFORMATION_SCHEMA.KEY_COLUMN_USAGE c
-	WHERE pk.TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
-	AND pk.TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
-	AND CONSTRAINT_TYPE = 'PRIMARY KEY'
-	AND c.TABLE_NAME = pk.TABLE_NAME
-	AND c.TABLE_SCHEMA = pk.TABLE_SCHEMA
-	AND c.CONSTRAINT_NAME = pk.CONSTRAINT_NAME
-	ORDER BY c.ORDINAL_POSITION
+  SELECT @PK_column_list = @PK_column_list + '[' + c.name + '], ',
+         @PK_column_joins = @PK_column_joins + '[Target].[' + c.name + '] = [Source].[' + c.name + '] AND '
+  FROM sys.key_constraints kc
+  INNER JOIN sys.index_columns ic ON kc.parent_object_id = ic.object_id AND kc.unique_index_id = ic.index_id
+  INNER JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+  WHERE kc.type = 'PK'
+    AND kc.parent_object_id = OBJECT_ID(QUOTENAME(COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())) + '.' + QUOTENAME(@Internal_Table_Name))
+  ORDER BY ic.key_ordinal
 END
 ELSE
 BEGIN
-	SELECT @PK_column_list = @PK_column_list + '[' + c.COLUMN_NAME + '], '
-	, @PK_column_joins = @PK_column_joins + '([Target].[' + c.COLUMN_NAME + '] = [Source].[' + c.COLUMN_NAME + ']' + CASE WHEN c.IS_NULLABLE='YES' THEN ' OR ([Target].[' + c.COLUMN_NAME + '] IS NULL AND [Source].[' + c.COLUMN_NAME + '] IS NULL)' ELSE '' END + ') AND '
-	FROM INFORMATION_SCHEMA.COLUMNS AS c
-	WHERE @cols_to_join_on LIKE '%''' + c.COLUMN_NAME + '''%' COLLATE DATABASE_DEFAULT
-	AND c.TABLE_NAME = @Internal_Table_Name COLLATE DATABASE_DEFAULT
-	AND c.TABLE_SCHEMA = COALESCE(@schema COLLATE DATABASE_DEFAULT, SCHEMA_NAME())
+  SELECT @PK_column_list = @PK_column_list + '[' + c.name + '], ',
+         @PK_column_joins = @PK_column_joins + '([Target].[' + c.name + '] = [Source].[' + c.name + ']' + 
+                            CASE WHEN c.is_nullable = 1 THEN ' OR ([Target].[' + c.name + '] IS NULL AND [Source].[' + c.name + '] IS NULL)' ELSE '' END + ') AND '
+  FROM sys.columns c
+  INNER JOIN sys.tables t ON c.object_id = t.object_id
+  WHERE @cols_to_join_on LIKE '%''' + c.name + '''%' COLLATE DATABASE_DEFAULT
+    AND t.name = @Internal_Table_Name COLLATE DATABASE_DEFAULT
+    AND t.schema_id = COALESCE(SCHEMA_ID(@schema COLLATE DATABASE_DEFAULT), SCHEMA_ID())
 END
 
 IF ISNULL(@PK_column_list COLLATE DATABASE_DEFAULT, '') = '' 
