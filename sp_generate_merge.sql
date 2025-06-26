@@ -510,11 +510,11 @@ WHILE @Column_ID IS NOT NULL
 BEGIN
   SELECT @Column_Name = QUOTENAME(c.name), 
          @Column_Name_Unquoted = c.name,
-         @Data_Type = bt.name
+         @Data_Type = COALESCE(bt.name, tp.name)
   FROM sys.columns c
   INNER JOIN sys.tables t ON c.object_id = t.object_id
   INNER JOIN sys.types tp ON c.user_type_id = tp.user_type_id
-  INNER JOIN sys.types bt ON tp.system_type_id = bt.user_type_id AND tp.system_type_id = bt.system_type_id
+  LEFT JOIN sys.types bt ON tp.system_type_id = bt.user_type_id AND tp.system_type_id = bt.system_type_id
   WHERE c.column_id = @Column_ID
     AND t.name = @Internal_Table_Name COLLATE DATABASE_DEFAULT
     AND t.schema_id = COALESCE(SCHEMA_ID(@schema COLLATE DATABASE_DEFAULT), SCHEMA_ID())
