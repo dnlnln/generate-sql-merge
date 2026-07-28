@@ -578,6 +578,7 @@ BEGIN
     WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('text')                                                                  THEN '''''''''  + REPLACE(CONVERT(varchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''''
     WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('ntext')                                                                 THEN '''N'''''' + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''''''
     WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('xml')                                                                   THEN '''CAST(N'''''' + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''' AS XML)'''
+    WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('json')                                                                  THEN '''CAST(N'''''' + REPLACE(CONVERT(nvarchar(max),' + @Column_Name + '),'''''''','''''''''''')+'''''' AS JSON)'''
     WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('binary','varbinary')                                                    THEN 'RTRIM(CONVERT(varchar(max),' + @Column_Name + ', 1))'
     WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('image')                                                                 THEN 'RTRIM(CONVERT(varchar(max), CONVERT(varbinary(max), ' + @Column_Name + ', 1), 1))'
     WHEN @Data_Type COLLATE DATABASE_DEFAULT IN ('float','real','money','smallmoney')                                     THEN 'LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ',2)' + '))'
@@ -600,7 +601,7 @@ BEGIN
                                                                                                                                 END) + '')'''
     ELSE                                                                                                                       'LTRIM(RTRIM(' + 'CONVERT(char, ' + @Column_Name + ')' + '))' 
   END
-  IF @results_to_text = 0 AND @Data_Type COLLATE DATABASE_DEFAULT IN ('xml','char','nchar','varchar','nvarchar','text','ntext','sql_variant') -- Workaround for SSMS quirk where any occurrences of "?>" are replaced with "? >" in the output grid
+  IF @results_to_text = 0 AND @Data_Type COLLATE DATABASE_DEFAULT IN ('xml','json','char','nchar','varchar','nvarchar','text','ntext','sql_variant') -- Workaround for SSMS quirk where any occurrences of "?>" are replaced with "? >" in the output grid
   BEGIN
     SET @Column_Value_Selector = 'REPLACE(' + @Column_Value_Selector + ',''?''+''>'',''?''''+''''>'')';
   END
@@ -640,6 +641,7 @@ BEGIN
         WHEN 'text'      THEN 'CAST([Source].' + @Column_Name + ' AS VARCHAR(MAX))'
         WHEN 'ntext'     THEN 'CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))'
         WHEN 'xml'       THEN 'CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))'
+        WHEN 'json'      THEN 'CAST([Source].' + @Column_Name + ' AS NVARCHAR(MAX))'
         WHEN 'image'     THEN 'CAST([Source].' + @Column_Name + ' AS VARBINARY(MAX))'
         WHEN 'geography' THEN 'CASE WHEN ((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geography::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) THEN 1 ELSE 0 END'
         WHEN 'geometry'  THEN 'CASE WHEN ((NOT ([Source].' + @Column_Name + ' IS NULL AND [Target].' + @Column_Name + ' IS NULL)) AND ISNULL(ISNULL([Source].' + @Column_Name + ', geometry::[Null]).STEquals([Target].' + @Column_Name + '), 0) = 0) THEN 1 ELSE 0 END'
